@@ -51,7 +51,7 @@ const Documentation = () => {
             <h1 className="text-xl font-medium mb-4 mt-12"> SIMPLIFIED AS A STARTER LANGUAGE</h1>
 
             <p className="text-lg font-light text-left">
-                Being an introductory programming language, KiddoCode's foundation was 
+                Being an introductory programming language, the foundation of KiddoCode was 
                 established on the Java Programming Language. The language introduces distinct 
                 data types and focuses more on easy-to-read syntax, especially in control flow and 
                 looping statements. Simplified functions are used through the declaration of tasks, 
@@ -85,8 +85,8 @@ const Documentation = () => {
               
         </div>
 
-        <Link className="hover:scale-110 transition-all duration-300 ease-out text-sm" href={'https://drive.google.com/file/d/1WTj7eH0ZqcDR4NdZd_cXVtp4MR2kURpt/view?usp=sharing'}>
-            <div className='border-[1px] border-neutral-800  rounded-lg h-24 p-4 flex justify-center items-center mx-64 gap-2 mt-12 hover:bg-teal-950 hover:cursor-pointer'>
+        <Link className="hover:scale-110 transition-all duration-300 ease-out text-sm" href={"https://drive.google.com/file/d/1WTj7eH0ZqcDR4NdZd_cXVtp4MR2kURpt/view?usp=sharing"}>
+            <div className="border-[1px] border-neutral-800  rounded-lg h-24 p-4 flex justify-center items-center mx-64 gap-2 mt-12 hover:bg-teal-950 hover:cursor-pointer">
                                 <img src='document.svg' className='h-6'></img>
                                 <p className='text-sm text-[#00C0D3]'>GET THE FULL DOCUMENTATION</p>
 
