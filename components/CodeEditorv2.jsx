@@ -178,7 +178,7 @@ const CodeEditorv2 = () => {
 
                             :
 
-                            <div className='w-full flex flex-col border-[1px] border-[#00C0D3] text-base rounded-md items-center justify-center px-4 py-4 hover:bg-teal-950 transition-all duration-300'>
+                            <div key={index} className='w-full flex flex-col border-[1px] border-[#00C0D3] text-base rounded-md items-center justify-center px-4 py-4 hover:bg-teal-950 transition-all duration-300'>
                                 <div className='w-full h-6 flex flex-row items-center justify-between'>
                                     <p className='text-xs text-neutral-400'>{token.type}</p>
                                     <p className='text-xs text-neutral-400'>{token.category ? token.category : ""}</p>
