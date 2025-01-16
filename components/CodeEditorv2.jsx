@@ -83,7 +83,7 @@ const CodeEditorv2 = () => {
                     <button className="bg-transparent flex flex-row gap-2 justify-center items-center border-[1px] border-[#FA7527] text-slate-50 py-2 px-8 rounded-lg text-sm hover:cursor-pointer  hover:bg-orange-900 hover:bg-opacity-70 transition-all duration-300"
                         onClick={() => document.getElementById('file-upload').click()}
                     >
-                        <img src='upload.svg' className='h-4'></img>
+                        <img src='/upload.svg' className='h-4'></img>
                         UPLOAD CODE
                     </button>
 
@@ -96,7 +96,7 @@ const CodeEditorv2 = () => {
                         style={{ display: 'none' }}
                     />
                         <button className="bg-[#00C0D3] flex flex-row gap-2 justify-center items-center text-slate-50 py-2 px-8 rounded-lg text-sm hover:cursor-pointer" onClick={handleSubmit}>
-                            <img src='submit.svg' className='h-4'></img>
+                            <img src='/submit.svg' className='h-4'></img>
                             SUBMIT
                         </button>
 
@@ -110,7 +110,7 @@ const CodeEditorv2 = () => {
                 
                 <div className="code_editor w-full flex-grow col-span-2 flex flex-col items-center justify-center py-8 px-8">
                         <div className='border-[1px] border-neutral-800  rounded-lg h-12 p-4 flex justify-center items-center w-full gap-2'>
-                            <img src='code.svg' className='h-6'></img>
+                            <img src='/code.svg' className='h-6'></img>
                             <p className='text-sm text-[#00C0D3]'>CODE EDITOR</p>
 
                         </div>
@@ -141,13 +141,13 @@ const CodeEditorv2 = () => {
 
                     <div className='w-full h-32 border-[1px] border-neutral-800 rounded-xl flex flex-row gap-4 justify-center items-center p-4'> 
                         <div className='border-[1px] border-[#FA7527] rounded-lg h-12 flex justify-center items-center w-full gap-2 hover:cursor-pointer hover:border- hover:bg-orange-950 hover:bg-opacity-70 transition-all duration-300'>
-                            <img src='token.svg' className='h-6'></img>
+                            <img src='/token.svg' className='h-6'></img>
                             <p className='text-sm text-[#FA7527]'>TOKENS</p>
 
                         </div>
                     
                         <div className='border-[1px]  border-neutral-800 rounded-lg h-12 flex justify-center items-center w-full gap-2 hover:border-[#00C0D3]  hover:bg-teal-950 hover:cursor-pointer transition-all duration-300'>
-                            <img src='ast_white.svg' className='h-6'></img>
+                            <img src='/ast_white.svg' className='h-6'></img>
                             <p className='text-sm '>AST</p>
 
                         </div>

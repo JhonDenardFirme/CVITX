@@ -24,7 +24,7 @@ const Features = () => {
         data-aos="fade-up" data-aos-delay="200"
       >
         <div className="rounded-full border-[1px] border-neutral-500 p-4 mb-6 absolute -top-8 bg-neutral-950 z-10">
-          <img src="shape.svg" className="w-8 object-cover"></img>
+          <img src="/shape.svg" className="w-8 object-cover"></img>
         </div>
         
         <h1 className="text-3xl font-bold mb-2 text-gradient-blue">SHAPE</h1>
@@ -39,7 +39,7 @@ const Features = () => {
         data-aos="fade-up" data-aos-delay="400"
       >
         <div className="rounded-full border-[1px] border-neutral-500 p-4 mb-6 absolute -top-8 bg-neutral-950 z-10">
-          <img src="color.svg" className="w-8 object-cover"></img>
+          <img src="/color.svg" className="w-8 object-cover"></img>
         </div>
         
         <h1 className="text-3xl font-bold mb-2 text-gradient-blue">COLOR</h1>
@@ -54,7 +54,7 @@ const Features = () => {
       <div className="flex flex-col w-full justify-center items-center feature-card border-[1px] border-neutral-500"
         data-aos="fade-up" data-aos-delay="600">
         <div className="rounded-full border-[1px] border-neutral-500 p-4 mb-6 absolute -top-8 bg-neutral-950 z-10">
-          <img src="emotion.svg" className="w-8 object-cover"></img>
+          <img src="/emotion.svg" className="w-8 object-cover"></img>
         </div>
         
         <h1 className="text-3xl font-bold mb-2 text-gradient-blue">EMOTION</h1>
@@ -67,7 +67,7 @@ const Features = () => {
       <div className="flex flex-col w-full justify-center items-center feature-card border-[1px] border-neutral-500"
         data-aos="fade-up" data-aos-delay="800">
         <div className="rounded-full border-[1px] border-neutral-500 p-4 mb-6 absolute -top-8 bg-neutral-950 z-10">
-          <img src="item.svg" className="w-8 object-cover"></img>
+          <img src="/item.svg" className="w-8 object-cover"></img>
         </div>
         
         <h1 className="text-3xl font-bold mb-2 text-gradient-blue">ITEM</h1>
@@ -80,7 +80,7 @@ const Features = () => {
       <div className="flex flex-col w-full justify-center items-center feature-card border-[1px] border-neutral-500"
         data-aos="fade-up" data-aos-delay="1000">
         <div className="rounded-full border-[1px] border-neutral-500 p-4 mb-6 absolute -top-8 bg-neutral-950 z-10">
-          <img src="recipe.svg" className="w-8 object-cover"></img>
+          <img src="/recipe.svg" className="w-8 object-cover"></img>
         </div>
         
         <h1 className="text-3xl font-bold mb-2 text-gradient-blue">RECIPE</h1>

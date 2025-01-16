@@ -23,7 +23,7 @@ const Intro = () => {
       <div className="grid grid-cols-2 justify-center items-center gap-8">
 
           <div className="flex flex-col justify-center items-center relative">
-              <img src="cube.png" className="w-[70%] object-cover"></img>
+              <img src="/cube.png" className="w-[70%] object-cover"></img>
 
 
           </div>

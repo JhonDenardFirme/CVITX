@@ -7,8 +7,8 @@ const Footer = () => {
       
 
       <div className="flex flex-col justify-center items-start w-full col-span-2 ">
-          <img src="Logo.png" className="h-16 ml-4"></img>
-          <img src="BannerTitle.png" className="h-24 ml-4"></img>
+          <img src="/Logo.png" className="h-16 ml-4"></img>
+          <img src="/BannerTitle.png" className="h-24 ml-4"></img>
 
           <div className=" p-2 pb-8 ml-1">
             <p className="text-xs text-white font:thin text-center">Copyright 2024 KiddoCode. All Rights Reserved.</p>
