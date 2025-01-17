@@ -74,8 +74,8 @@ const CodeEditorv2 = () => {
                 <div className="header h-36 w-full flex justify-between items-center ">
 
                 <Link className="h-20 w-auto flex justify-center items-center" href={'/'}>
-                    <img src="/Logo.png" className="object-cover h-8 w-auto hover:scale-110 transition-all duration-300 ease-out"></img>
-                    <img src="/Title.png" className="object-cover h-8 w-auto ml-2"></img>
+                    <img src="Logo.png" className="object-cover h-8 w-auto hover:scale-110 transition-all duration-300 ease-out"></img>
+                    <img src="Title.png" className="object-cover h-8 w-auto ml-2"></img>
                 </Link>
 
                     <div className='flex flex-row gap-2'>
