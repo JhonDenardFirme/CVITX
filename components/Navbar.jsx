@@ -7,8 +7,8 @@ const Navbar = async () => {
   return (
     <div className="w-full flex flex-row justify-between items-center px-16 h-[10vh] z-50">
         <Link className="h-20 w-auto flex justify-center items-center" href={'/'}>
-          <img src="/logo.png" className="object-cover h-8 w-auto hover:scale-110 transition-all duration-300 ease-out"></img>
-          <img src="/title.png" className="object-cover h-8 w-auto ml-2"></img>
+          <img src="/Logo.png" className="object-cover h-8 w-auto hover:scale-110 transition-all duration-300 ease-out"></img>
+          <img src="/Title.png" className="object-cover h-8 w-auto ml-2"></img>
         </Link>
 
         <div className="flex flex-row gap-16 justify-center ">
