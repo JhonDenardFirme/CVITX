@@ -27,13 +27,14 @@ const CodeEditorv2 = () => {
             const newTokens = tokenize(code); // Tokenize the code
             setTokens(newTokens); // Update tokens state
     
-            // Wait for the AST generation if it's asynchronous
-            const newAst = await generateAST(newTokens); // Generate AST from tokens
-            console.log('Generated AST:', newAst); // Log AST for debugging
-            setAst(newAst); // Update AST state
+            
+            // Not Working - AST Related
+            const newAst = await generateAST(newTokens); 
+            console.log('Generated AST:', newAst); 
+            setAst(newAst); 
     
-            console.log('Tokens:', newTokens); // Log tokens for debugging
-            console.log('AST:', newAst); // Log AST for debugging
+            console.log('Tokens:', newTokens); 
+            console.log('AST:', newAst); 
             console.log("SUBMITTED");
         } catch (error) {
             console.error("Error processing the code:", error);
@@ -47,15 +48,15 @@ const CodeEditorv2 = () => {
             const fileName = file.name;
             console.log(`File name: ${fileName}`);
     
-            // Ensure the file has the correct .kdx extension
+            // Checking if the file has correct File Type (.kdx)
             if (fileName.endsWith('.kdx')) {
                 const reader = new FileReader();
                 reader.onload = function (e) {
-                    const uploadedCode = e.target.result; // Read file content as text
-                    console.log(uploadedCode); // Check the content here (it should be plain text)
-                    setCode(uploadedCode); // Set the code state with the file content
+                    const uploadedCode = e.target.result; 
+                    console.log(uploadedCode); 
+                    setCode(uploadedCode); 
                 };
-                reader.readAsText(file); // Read the file as plain text
+                reader.readAsText(file); // Read the file as Plain Text
             } else {
                 alert('Please upload a valid .kdx file.');
             }
@@ -73,8 +74,8 @@ const CodeEditorv2 = () => {
                 <div className="header h-36 w-full flex justify-between items-center ">
 
                 <Link className="h-20 w-auto flex justify-center items-center" href={'/'}>
-                    <img src="/logo.png" className="object-cover h-8 w-auto hover:scale-110 transition-all duration-300 ease-out"></img>
-                    <img src="/title.png" className="object-cover h-8 w-auto ml-2"></img>
+                    <img src="Logo.png" className="object-cover h-8 w-auto hover:scale-110 transition-all duration-300 ease-out"></img>
+                    <img src="Title.png" className="object-cover h-8 w-auto ml-2"></img>
                 </Link>
 
                     <div className='flex flex-row gap-2'>

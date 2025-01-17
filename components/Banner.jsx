@@ -12,8 +12,8 @@ const Banner = () => {
             <Navbar></Navbar>
 
           <div className="flex flex-col justify-center items-center w-full p-16 mt-8">
-            <img src="/logo.png" className="h-64"></img>
-            <img src="/BannerTitle.png" className="h-52"></img>
+            <img src="Logo.png" className="h-64"></img>
+            <img src="BannerTitle.png" className="h-52"></img>
   
           </div>
   
