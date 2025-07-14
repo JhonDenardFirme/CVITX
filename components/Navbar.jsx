@@ -2,7 +2,7 @@ import Link from "next/link"
 
 
 
-const Navbar = async () => {
+const Navbar = () => {
 
   return (
     <div className="w-full flex flex-row justify-between items-center px-16 h-[10vh] z-50">
@@ -12,16 +12,16 @@ const Navbar = async () => {
         </Link>
 
         <div className="flex flex-row gap-16 justify-center ">
-          <Link className="hover:scale-110 hover:text-[#2dc1d6] transition-all duration-300 ease-out text-sm" href={'/'}>
+          <Link className="hover:scale-110 hover:text-[#2dc1d6] transition-all duration-300 ease-out text-sm text-white" href={'/'}>
             Home
           </Link>
 
-          <Link className="hover:scale-110 hover:text-[#2dc1d6] transition-all duration-300 ease-out text-sm" href={'/Documentation'}>
+          <Link className="hover:scale-110 hover:text-[#2dc1d6] transition-all duration-300 ease-out text-sm text-white" href={'/Documentation'}>
             Documentation
           </Link>
 
-          <Link className="hover:scale-110 hover:text-[#2dc1d6] transition-all duration-300 ease-out text-sm" href={'/CodeEditor'}>
-            Code Editor
+          <Link className="hover:scale-110 hover:text-[#2dc1d6] transition-all duration-300 ease-out text-sm text-white" href={'/auth-signin'}>
+            Sign In
           </Link>
 
           

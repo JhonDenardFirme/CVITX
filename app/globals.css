@@ -3,18 +3,6 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 @font-face {
   font-family: 'Jost';
   src: url('/fonts/Jost-Variable.ttf') format('truetype'); /* Specify 'truetype' for .ttf */
@@ -23,9 +11,8 @@
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
   font-family: Jost, Arial, Helvetica, sans-serif;
+  background: #000;
 }
 
 *{
@@ -104,10 +91,187 @@ body {
   color: transparent;
 }
 
+.text-gradient-orange{
+  background: linear-gradient(
+    45deg,
+    rgba(250, 158, 26, 1) 0%,
+    rgba(250, 48, 5,1) 100%
+    
+  );
+  background-clip: text;
+  color: transparent;
+}
+
 
 
 .feature-card{
   background: linear-gradient( rgba(10,10,10,0.2) 0%, rgba(30,30,30,0.2) 100% );
   backdrop-filter: blur(60px);
   border-radius: 24px;
+}
+
+
+
+
+
+
+
+@layer base {
+  :root {
+    /* Light Mode Colors */
+
+    /* Page background (ex: body) — Tailwind: neutral-50 */
+    --background: 0 0% 100%;
+
+    /* Default text color — Tailwind: neutral-900 */
+    --foreground: 20 14.3% 4.1%;
+
+    /* Card backgrounds — Tailwind: white (neutral-50) */
+    --card: 0 0% 100%;
+
+    /* Card text color — Tailwind: neutral-900 */
+    --card-foreground: 20 14.3% 4.1%;
+
+    /* Popover panel backgrounds (dropdowns, tooltips) — Tailwind: white */
+    --popover: 0 0% 100%;
+
+    /* Text inside popovers — Tailwind: neutral-900 */
+    --popover-foreground: 20 14.3% 4.1%;
+
+    /* Primary button background — Tailwind: orange-500 */
+    --primary: 24.6 95% 53.1%;
+
+    /* Text inside primary buttons — Tailwind: neutral-50 */
+    --primary-foreground: 60 9.1% 97.8%;
+
+    /* Secondary button background — Tailwind: neutral-100 */
+    --secondary: 60 4.8% 95.9%;
+
+    /* Text inside secondary buttons — Tailwind: neutral-900 */
+    --secondary-foreground: 24 9.8% 10%;
+
+    /* Muted UI (e.g., tags, placeholders) — Tailwind: neutral-100 */
+    --muted: 60 4.8% 95.9%;
+
+    /* Muted text (e.g., form hints) — Tailwind: neutral-500 */
+    --muted-foreground: 25 5.3% 44.7%;
+
+    /* Accent UI (ex: tabs, icons) — Tailwind: neutral-100 */
+    --accent: 60 4.8% 95.9%;
+
+    /* Accent text — Tailwind: neutral-900 */
+    --accent-foreground: 24 9.8% 10%;
+
+    /* Danger/red buttons — Tailwind: red-500 */
+    --destructive: 0 84.2% 60.2%;
+
+    /* Text on danger buttons — Tailwind: neutral-50 */
+    --destructive-foreground: 60 9.1% 97.8%;
+
+    /* Border colors — Tailwind: neutral-200 */
+    --border: 20 5.9% 90%;
+
+    /* Input borders — Tailwind: neutral-200 */
+    --input: 20 5.9% 90%;
+
+    /* Focus ring — Tailwind: orange-500 */
+    --ring: 24.6 95% 53.1%;
+
+    /* Border radius — Tailwind: rounded-md (~10px) */
+    --radius: 0.65rem;
+
+    /* Chart colors (for graphs, analytics) */
+    --chart-1: 24.6 95% 53.1%;   /* Orange */
+    --chart-2: 173 58% 39%;  /* Teal */
+    --chart-3: 197 37% 24%;  /* Navy Blue */
+    --chart-4: 43 74% 66%;   /* Yellow/Gold */
+    --chart-5: 27 87% 67%;   /* Deeper Orange */
+  }
+
+  .dark {
+    /* Dark Mode Colors */
+
+    /* Page background — Tailwind: neutral-950 */
+    --background: 20 0% 3.9%;
+
+    /* Default text color — Tailwind: neutral-50 */
+    --foreground: 60 9.1% 97.8%;
+
+    /* Card backgrounds — Tailwind: neutral-900 */
+    --card: 20 14.3% 4.1%;
+
+    /* Card text color — Tailwind: neutral-50 */
+    --card-foreground: 60 9.1% 97.8%;
+
+    /* Popovers — Tailwind: neutral-900 */
+    --popover: 20 14.3% 4.1%;
+
+    /* Text in popovers — Tailwind: neutral-50 */
+    --popover-foreground: 60 9.1% 97.8%;
+
+    /* Primary button background — Tailwind: orange-500 */
+    --primary: 24.6 95% 53.1%;
+
+    /* Text inside primary buttons — Tailwind: neutral-50 */
+    --primary-foreground: 60 9.1% 97.8%;
+
+    /* Secondary button background — Tailwind: neutral-800 */
+    --secondary: 12 6.5% 15.1%;
+
+    /* Text inside secondary buttons — Tailwind: neutral-50 */
+    --secondary-foreground: 60 9.1% 97.8%;
+
+    /* Muted UI — Tailwind: neutral-800 */
+    --muted: 12 6.5% 15.1%;
+
+    /* Muted text — Tailwind: neutral-500 */
+    --muted-foreground: 24 5.4% 63.9%;
+
+    /* Accent UI — Tailwind: neutral-800 */
+    --accent: 12 6.5% 15.1%;
+
+    /* Accent text — Tailwind: neutral-50 */
+    --accent-foreground: 60 9.1% 97.8%;
+
+    /* Danger/red buttons — Tailwind: red-600 */
+    --destructive: 0 72.2% 50.6%;
+
+    /* Text on danger buttons — Tailwind: neutral-50 */
+    --destructive-foreground: 60 9.1% 97.8%;
+
+    /* Border color — Tailwind: neutral-800 */
+    --border: 12 6.5% 15.1%;
+
+    /* Input border color — Tailwind: neutral-800 */
+    --input: 12 6.5% 15.1%;
+
+    /* Focus ring — Tailwind: orange-500 */
+    --ring: 24.6 95% 53.1%;
+
+    /* Chart colors (same as light) */
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
 }

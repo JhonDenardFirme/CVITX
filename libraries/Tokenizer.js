@@ -66,7 +66,7 @@ export function tokenize(sourceCode) {
     let hasAssignmentOp = false;
 
 
-
+    
     while (currentPosition < sourceCode.length) {
         let matchFound = false;
         const remainingSource = sourceCode.slice(currentPosition);

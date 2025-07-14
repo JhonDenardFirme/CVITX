@@ -13,13 +13,16 @@ const geistMono = localFont({
 });
 
 export const metadata = {
-  title: "KiddoCode",
-  description: "Programming Language in Baby Mode",
+  title: "CVITX",
+  description: "Automated Vehicle Indexing System",
 };
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
+      <head>
+        <link rel="icon" type="image/png" href="/favicon.png" />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
