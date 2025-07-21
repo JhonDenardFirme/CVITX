@@ -15,7 +15,7 @@ const Stats = () => {
   }, []);
 
   return (
-    <div className="px-32 grid grid-cols-4 gap-32 h-18 mt-16">
+    <div className="px-32 grid grid-cols-4 gap-32 h-18 mt-16 z-50">
       <div className="flex flex-col w-full justify-center items-center"         
         data-aos="fade-up" // Using custom AOS trigger name
         data-aos-duration="1000"
@@ -23,8 +23,8 @@ const Stats = () => {
         data-aos-offset="50"
         
         >
-        <p className="num-text">10M+</p>
-        <p className="desc-text">CODE WRITTEN</p>
+        <p className="num-text">500K+</p>
+        <p className="desc-text">VEHICLES INDEXED</p>
       </div>
 
       <div className="flex flex-col w-full justify-center items-center "
@@ -32,8 +32,8 @@ const Stats = () => {
               data-aos-duration="1000"
               data-aos-delay="250"
               data-aos-offset="50">
-        <p className="num-text">300K+</p>
-        <p className="desc-text">ACTIVE DEVELOPERS</p>
+        <p className="num-text">1K+</p>
+        <p className="desc-text">INVESTIGATIONS SUPPORTED</p>
       </div>
 
       <div className="flex flex-col w-full justify-center items-center "
@@ -41,8 +41,8 @@ const Stats = () => {
               data-aos-duration="1000"
               data-aos-delay="400"
               data-aos-offset="50">
-        <p className="num-text">100+</p>
-        <p className="desc-text">PARTNER CLIENTS</p>
+        <p className="num-text">5K+</p>
+        <p className="desc-text">AI REPORTS GENERATED</p>
       </div>
 
       <div className="flex flex-col w-full justify-center items-center"
@@ -50,8 +50,8 @@ const Stats = () => {
               data-aos-duration="1000"
               data-aos-delay="550"
               data-aos-offset="50">
-        <p className="num-text">200+</p>
-        <p className="desc-text">PLATFORMS</p>
+        <p className="num-text">10K+</p>
+        <p className="desc-text">FOOTAGE HOURS ANALYZED</p>
       </div>
 
 

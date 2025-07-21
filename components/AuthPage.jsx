@@ -1,7 +1,17 @@
 import Link from "next/link";
 import Navbar from "./Navbar";
+import { useRouter } from 'next/navigation' 
 
 const AuthPage = () => {
+
+    const router = useRouter();
+
+    const handleSubmit = (e) => {
+    e.preventDefault()
+    router.push('/dashboard');
+  }
+
+
   return (
     <div className="grid grid-cols-5 w-full h-screen overflow-hidden">
       
@@ -25,7 +35,7 @@ const AuthPage = () => {
 
       
       <div className="col-span-2 flex justify-center items-center ">
-        <form className="w-96 flex flex-col gap-6">
+        <form className="w-96 flex flex-col gap-6" onSubmit={handleSubmit}>
           
           {/* Header */}
           <div className="text-center">

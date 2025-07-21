@@ -31,20 +31,24 @@ const FootagePlayback = () => {
   const videoRef = useRef(null)
 
   useEffect(() => {
-    const video = videoRef.current
-    if (!video) return
+    const video = videoRef.current;
+    if (!video) return;
 
-    const updateTime = () => setCurrentTime(video.currentTime)
-    const updateDuration = () => setDuration(video.duration || 0)
+    const updateTime = () => setCurrentTime(video.currentTime);
+    const updateDuration = () => setDuration(video.duration || 0);
 
-    video.addEventListener("timeupdate", updateTime)
-    video.addEventListener("loadedmetadata", updateDuration)
+    video.addEventListener("timeupdate", updateTime);
+    video.addEventListener("loadedmetadata", updateDuration);
+
+    // **NEW**: immediately set them in case events already fired
+    updateDuration();
+    updateTime();
 
     return () => {
-      video.removeEventListener("timeupdate", updateTime)
-      video.removeEventListener("loadedmetadata", updateDuration)
-    }
-  }, [videoIndex])
+      video.removeEventListener("timeupdate", updateTime);
+      video.removeEventListener("loadedmetadata", updateDuration);
+    };
+  }, [videoIndex]);
 
   const handlePlay = () => {
     videoRef.current?.play()
@@ -139,6 +143,8 @@ const FootagePlayback = () => {
           src={`/footage/footage${videoIndex}.mp4`}
           className="h-full w-auto object-contain rounded-xl"
           controls={false}
+          onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+          onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
         />
       </div>
 

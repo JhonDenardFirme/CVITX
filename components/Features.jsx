@@ -13,8 +13,8 @@ const Features = () => {
   return (
     <div className="flex flex-col h-[450px] justify-center items-center z-40 mt-52 mb-16">
 
-      <h1 className="text-4xl font-medium"> OUR CUSTOM <span className="text-gradient-blue font-extrabold" data-aos="fade-up"> DATA TYPES</span></h1>
-      <h1 className="text-4xl font-medium mb-8">FOR CREATIVITY & EXPRESSION</h1>
+      <h1 className="text-4xl font-medium"> SUPPORTED <span className="text-gradient-blue font-extrabold" data-aos="fade-up"> FINE-GRAINED</span></h1>
+      <h1 className="text-4xl font-medium mb-8">VEHICLE INFORMATION</h1>
 
     <div className="px-32 grid grid-cols-5 gap-16 h-56 w-full relative mt-16">
 
@@ -27,9 +27,9 @@ const Features = () => {
           <img src="/shape.svg" className="w-8 object-cover"></img>
         </div>
         
-        <h1 className="text-3xl font-bold mb-2 text-gradient-blue">SHAPE</h1>
+        <h1 className="text-3xl font-bold mb-2 text-gradient-blue">TYPE</h1>
         <p className="text-white text-sm text-center w-[80%] font-light ">
-        Teaches naming polygons and number of corners
+        Defines the broad vehicle category
         </p>
 
       </div>
@@ -42,9 +42,9 @@ const Features = () => {
           <img src="/color.svg" className="w-8 object-cover"></img>
         </div>
         
-        <h1 className="text-3xl font-bold mb-2 text-gradient-blue">COLOR</h1>
+        <h1 className="text-3xl font-bold mb-2 text-gradient-blue">MAKE</h1>
         <p className="text-white text-sm text-center w-[80%] font-light ">
-        Teaches mixing and modifications of colors
+        Identifies the manufacturer brand
 
         </p>
 
@@ -57,9 +57,9 @@ const Features = () => {
           <img src="/emotion.svg" className="w-8 object-cover"></img>
         </div>
         
-        <h1 className="text-3xl font-bold mb-2 text-gradient-blue">EMOTION</h1>
+        <h1 className="text-3xl font-bold mb-2 text-gradient-blue">MODEL</h1>
         <p className="text-white text-sm text-center w-[80%] font-light">
-        Teaches the concept of combining emotions
+        Specifies the vehicle variant
         </p>
 
       </div>
@@ -70,9 +70,9 @@ const Features = () => {
           <img src="/item.svg" className="w-8 object-cover"></img>
         </div>
         
-        <h1 className="text-3xl font-bold mb-2 text-gradient-blue">ITEM</h1>
+        <h1 className="text-3xl font-bold mb-2 text-gradient-blue">PLATE</h1>
         <p className="text-white text-sm text-center w-[80%] font-light">
-        Teaches basic recipes and combining the right items
+        Records the license-plate identifier
         </p>
 
       </div>
@@ -83,9 +83,9 @@ const Features = () => {
           <img src="/recipe.svg" className="w-8 object-cover"></img>
         </div>
         
-        <h1 className="text-3xl font-bold mb-2 text-gradient-blue">RECIPE</h1>
+        <h1 className="text-3xl font-bold mb-2 text-gradient-blue">METADATA</h1>
         <p className="text-white text-sm text-center w-[80%] font-light">
-        Teaches procedural programming
+        Captures timestamps and location details
         </p>
 
       </div>
