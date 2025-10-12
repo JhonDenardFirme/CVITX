@@ -1,7 +1,14 @@
 {
   "compilerOptions": {
+    "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": [
+        "./*"
+      ] // if components folder is at ./components
+      // "@/*": ["./src/*"]   // use this instead if your project uses a /src layout
     }
-  }
+  },
+  "exclude": [
+    "node_modules"
+  ]
 }

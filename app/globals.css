@@ -255,6 +255,10 @@ body {
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
   }
+
+
+
+
 }
 
 
@@ -273,5 +277,51 @@ body {
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+
+
+/* === Global dark, thin scrollbars (Firefox, Chrome, Safari, Edge) === */
+@layer base {
+  :root {
+    /* tweak these to taste */
+    --scroll-size: 8px;
+    --scroll-radius: 9999px;
+    --scroll-thumb: rgba(113,113,122,.8);   /* zinc-500/80 */
+    --scroll-thumb-hover: rgba(161,161,170,.9); /* zinc-400/90 */
+    --scroll-track: rgba(24,24,27,.25);     /* neutral-900/25 */
+  }
+  .dark {
+    --scroll-thumb: rgba(82,82,91,.85);     /* zinc-600/85 */
+    --scroll-thumb-hover: rgba(113,113,122,.95); /* zinc-500/95 */
+    --scroll-track: rgba(24,24,27,.4);      /* neutral-900/40 */
+  }
+
+  /* Firefox */
+  * {
+    scrollbar-width: thin; /* thin | auto | none */
+    scrollbar-color: var(--scroll-thumb) var(--scroll-track);
+  }
+
+  /* WebKit (Chrome/Safari/Edge) */
+  *::-webkit-scrollbar {
+    width: var(--scroll-size);
+    height: var(--scroll-size);
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--scroll-thumb);
+    border-radius: var(--scroll-radius);
+    border: 2px solid transparent;   /* creates an inner padding -> even thinner look */
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scroll-thumb-hover);
+  }
+  *::-webkit-scrollbar-track {
+    background: var(--scroll-track);
+  }
+  *::-webkit-scrollbar-corner {
+    background: transparent;
   }
 }
