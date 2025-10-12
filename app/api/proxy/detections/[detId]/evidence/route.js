@@ -1,61 +1,85 @@
-// NOTE: Backend endpoint for rendered evidence images is not yet implemented.
-// We still call it so the client can handle failures gracefully.
-// TODO (backend): provide POST /api/detections/:detId/evidence-image → { image_url: string }
+// NOTE: Backend endpoint for rendered evidence images may return 200 (ready) or 202 (processing).
+// We pass the backend response through verbatim so the client can decide what to do.
 
-export async function POST(_req, { params }) {
+function getBase() {
+  const raw = process.env.CVX_API_BASE_URL || process.env.BACKEND_BASE_URL || "";
+  const base = raw.replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(base)) return null;
+  return base;
+}
+
+function buildAuthHeaders(req) {
+  const headers = {};
+  const apiKey = process.env.CVX_API_KEY || "";
+  if (apiKey) headers["x-api-key"] = apiKey;
+
+  // Forward inbound cookies so the backend can read sessions if it wants.
+  const incomingCookie = req.headers.get("cookie") || "";
+  if (incomingCookie) headers["cookie"] = incomingCookie;
+
+  // Also synthesize Authorization: Bearer <cvx_session> from the cookie (harmless if backend ignores it).
+  const m = incomingCookie.match(/(?:^|;\s*)cvx_session=([^;]+)/);
+  if (m) {
+    let bearer = m[1];
+    try { bearer = decodeURIComponent(bearer); } catch {}
+    headers["authorization"] = `Bearer ${bearer}`;
+  }
+
+  return headers;
+}
+
+export async function POST(req, { params }) {
   try {
-    const base = (process.env.CVX_API_BASE_URL || '').replace(/\/+$/, '')
-    const apiKey = process.env.CVX_API_KEY
-    const detId = (await params).detId
-    if (!/^https?:\/\//i.test(base)) return new Response('CVX_API_BASE_URL invalid', { status: 500 })
-    if (!apiKey) return new Response('CVX_API_KEY missing', { status: 500 })
-    if (!detId) return new Response('detId missing', { status: 400 })
+    const base = getBase();
+    if (!base) return new Response("CVX_API_BASE_URL invalid", { status: 500 });
 
-    const r = await fetch(`${base}/api/detections/${detId}/evidence-image`, {
-      method: 'POST',
-      headers: { 'x-api-key': apiKey },
-      cache: 'no-store',
-    })
-    const ct = r.headers.get('content-type') || 'application/json'
-    // pass-through body; client will handle errors or missing image_url
-    return new Response(await r.text(), { status: r.status, headers: { 'content-type': ct, 'cache-control': 'no-store' } })
+    const detId = params?.detId;
+    if (!detId) return new Response("detId missing", { status: 400 });
+
+    const url = `${base}/api/detections/${detId}/evidence-image`;
+    const headers = buildAuthHeaders(req);
+
+    console.log("[proxy:detections:evidence] →", url, {
+      hasApiKey: Boolean(headers["x-api-key"]),
+      hasCookie: Boolean(headers["cookie"]),
+      hasBearer: Boolean(headers["authorization"]),
+    });
+
+    // Pass-through POST (no body needed today). Keep no-store.
+    const r = await fetch(url, {
+      method: "POST",
+      headers,
+      cache: "no-store",
+    });
+
+    const ct = r.headers.get("content-type") || "application/json";
+    const text = await r.text();
+    console.log("[proxy:detections:evidence] status=", r.status, "bytes=", text.length);
+
+    // Mirror backend body/status; client handles 200/202/4xx cases.
+    return new Response(text, {
+      status: r.status,
+      headers: { "content-type": ct, "cache-control": "no-store" },
+    });
   } catch (e) {
-    console.error('[proxy:detections:evidence] error', e)
-    // return a JSON error the client can detect
-    return new Response(JSON.stringify({ error: 'Proxy error' }), {
+    console.error("[proxy:detections:evidence] error", e);
+    // Return JSON the client can safely parse.
+    return new Response(JSON.stringify({ error: "Proxy error" }), {
       status: 500,
-      headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
-    })
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    });
   }
 }
 
-
-
 /*
-TODO (to revisit after backend ships evidence rendering)
-
-Backend endpoints needed:
+Backend endpoints expected:
 
 POST /api/detections/:detId/evidence-image
+Auth: x-api-key and/or cookie/JWT (we send both)
+Response:
+  200 { image_url: string }  // ready
+  202 { status: "processing" } (optional)
+  404 … if det not found
 
-Request: no body needed initially (or { style?: "default" } later)
-
-Auth: x-api-key
-
-Response (200): { image_url: string } — a stable URL to a 640×640 rendered visualization showing the full vehicle and parts boxes/labels.
-
-Errors: 404 if not found; 202 acceptable if rendering is async, ideally also return a polling URL.
-
-(Optional) GET /api/detections/:detId/evidence-image
-
-Use: retrieve URL if previously generated (idempotent).
-
-Client follow-up once backend is ready:
-
-In the Details dialog, replace the fallback “load original image if call fails” with:
-
-Call POST → if 202, show “processing” with a retry/poll; if 200, show image_url.
-
-Remove any temporary fallback that uses the original image when the evidence call fails.
-
+(Optional later) GET /api/detections/:detId/evidence-image
 */

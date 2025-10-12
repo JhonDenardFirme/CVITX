@@ -1,66 +1,110 @@
-export async function GET(_req, { params }) {
-  try {
-    const base = (process.env.CVX_API_BASE_URL || '').replace(/\/+$/, '')
-    const apiKey = process.env.CVX_API_KEY
-    const detId = (await params).detId
-    if (!/^https?:\/\//i.test(base)) return new Response('CVX_API_BASE_URL invalid', { status: 500 })
-    if (!apiKey) return new Response('CVX_API_KEY missing', { status: 500 })
-    if (!detId) return new Response('detId missing', { status: 400 })
+function buildAuthHeaders(req) {
+  const headers = {};
+  const apiKey = process.env.CVX_API_KEY || "";
+  if (apiKey) headers["x-api-key"] = apiKey;
 
-    const r = await fetch(`${base}/api/detections/${detId}`, {
-      headers: { 'x-api-key': apiKey },
-      cache: 'no-store',
-    })
-    const ct = r.headers.get('content-type') || 'application/json'
-    return new Response(await r.text(), { status: r.status, headers: { 'content-type': ct, 'cache-control': 'no-store' } })
+  const incomingCookie = req.headers.get("cookie") || "";
+  if (incomingCookie) headers["cookie"] = incomingCookie;
+
+  // optional Bearer from cvx_session cookie
+  const m = incomingCookie.match(/(?:^|;\s*)cvx_session=([^;]+)/);
+  if (m) {
+    let bearer = m[1];
+    try { bearer = decodeURIComponent(bearer); } catch {}
+    headers["authorization"] = `Bearer ${bearer}`;
+  }
+
+  return headers;
+}
+
+function getBase() {
+  const raw = process.env.CVX_API_BASE_URL || process.env.BACKEND_BASE_URL || "";
+  const base = raw.replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(base)) return null;
+  return base;
+}
+
+export async function GET(req, { params }) {
+  try {
+    const base = getBase();
+    if (!base) return new Response("CVX_API_BASE_URL invalid", { status: 500 });
+
+    const detId = params?.detId;
+    if (!detId) return new Response("detId missing", { status: 400 });
+
+    const url = `${base}/api/detections/${detId}`;
+    const headers = buildAuthHeaders(req);
+
+    console.log("[proxy:detections:detail] →", url, {
+      hasApiKey: Boolean(headers["x-api-key"]),
+      hasCookie: Boolean(headers["cookie"]),
+      hasBearer: Boolean(headers["authorization"]),
+    });
+
+    const r = await fetch(url, { headers, cache: "no-store" });
+    const ct = r.headers.get("content-type") || "application/json";
+    const text = await r.text();
+
+    return new Response(text, {
+      status: r.status,
+      headers: { "content-type": ct, "cache-control": "no-store" },
+    });
   } catch (e) {
-    console.error('[proxy:detections:detail] error', e)
-    return new Response('Proxy error', { status: 500 })
+    console.error("[proxy:detections:detail] error", e);
+    return new Response("Proxy error", { status: 500 });
   }
 }
 
 export async function PATCH(req, { params }) {
   try {
-    const base = (process.env.CVX_API_BASE_URL || '').replace(/\/+$/, '')
-    const apiKey = process.env.CVX_API_KEY
-    const detId = (await params).detId
-    if (!/^https?:\/\//i.test(base)) return new Response('CVX_API_BASE_URL invalid', { status: 500 })
-    if (!apiKey) return new Response('CVX_API_KEY missing', { status: 500 })
-    if (!detId) return new Response('detId missing', { status: 400 })
+    const base = getBase();
+    if (!base) return new Response("CVX_API_BASE_URL invalid", { status: 500 });
 
-    const body = await req.text() // pass through JSON as-is
-    const r = await fetch(`${base}/api/detections/${detId}`, {
-      method: 'PATCH',
-      headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
-      body,
-      cache: 'no-store',
-    })
-    const ct = r.headers.get('content-type') || 'application/json'
-    return new Response(await r.text(), { status: r.status, headers: { 'content-type': ct, 'cache-control': 'no-store' } })
+    const detId = params?.detId;
+    if (!detId) return new Response("detId missing", { status: 400 });
+
+    const url = `${base}/api/detections/${detId}`;
+    const headers = { ...buildAuthHeaders(req), "content-type": "application/json" };
+    const body = await req.text();
+
+    console.log("[proxy:detections:patch] →", url);
+
+    const r = await fetch(url, { method: "PATCH", headers, body, cache: "no-store" });
+    const ct = r.headers.get("content-type") || "application/json";
+    const text = await r.text();
+
+    return new Response(text, {
+      status: r.status,
+      headers: { "content-type": ct, "cache-control": "no-store" },
+    });
   } catch (e) {
-    console.error('[proxy:detections:patch] error', e)
-    return new Response('Proxy error', { status: 500 })
+    console.error("[proxy:detections:patch] error", e);
+    return new Response("Proxy error", { status: 500 });
   }
 }
 
-export async function DELETE(_req, { params }) {
+export async function DELETE(req, { params }) {
   try {
-    const base = (process.env.CVX_API_BASE_URL || '').replace(/\/+$/, '')
-    const apiKey = process.env.CVX_API_KEY
-    const detId = (await params).detId
-    if (!/^https?:\/\//i.test(base)) return new Response('CVX_API_BASE_URL invalid', { status: 500 })
-    if (!apiKey) return new Response('CVX_API_KEY missing', { status: 500 })
-    if (!detId) return new Response('detId missing', { status: 400 })
+    const base = getBase();
+    if (!base) return new Response("CVX_API_BASE_URL invalid", { status: 500 });
 
-    const r = await fetch(`${base}/api/detections/${detId}`, {
-      method: 'DELETE',
-      headers: { 'x-api-key': apiKey },
-      cache: 'no-store',
-    })
-    // DELETE may return empty body; mirror status and provide empty json
-    return new Response(JSON.stringify({}), { status: r.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })
+    const detId = params?.detId;
+    if (!detId) return new Response("detId missing", { status: 400 });
+
+    const url = `${base}/api/detections/${detId}`;
+    const headers = buildAuthHeaders(req);
+
+    console.log("[proxy:detections:delete] →", url);
+
+    const r = await fetch(url, { method: "DELETE", headers, cache: "no-store" });
+
+    // keep your previous DELETE behavior: return {} and mirror status
+    return new Response(JSON.stringify({}), {
+      status: r.status,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    });
   } catch (e) {
-    console.error('[proxy:detections:delete] error', e)
-    return new Response('Proxy error', { status: 500 })
+    console.error("[proxy:detections:delete] error", e);
+    return new Response("Proxy error", { status: 500 });
   }
 }
