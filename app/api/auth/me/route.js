@@ -19,8 +19,7 @@ export async function GET() {
         // 3) Best-effort: decode JWT from cookie to avoid breaking clients
         if (e2 instanceof Response && e2.status === 404) {
           try {
-            const jar = await cookies();
-            // const jar = cookies(); // sync
+            const jar = cookies(); // sync
             const token = jar.get(SESSION_COOKIE)?.value;
             if (!token) return NextResponse.json(null); // 200 with null JSON
             const payloadB64 = token.split(".")[1];
