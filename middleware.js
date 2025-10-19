@@ -12,14 +12,16 @@ export function middleware(req) {
   );
   if (!isProtected) return NextResponse.next();
 
+
+  // !!!!!!!!!!!!!!!!! UNCOMMENT THIS LATER
   // Cookie-only check (no network)
-  const token = req.cookies.get(SESSION)?.value;
-  if (!token) {
-    const url = new URL("/auth-signin", req.url);
-    // preserve the original path + query so we can bounce back post-login
-    url.searchParams.set("next", `${pathname}${search || ""}`);
-    return NextResponse.redirect(url);
-  }
+  //const token = req.cookies.get(SESSION)?.value;
+  //if (!token) {
+  //  const url = new URL("/auth-signin", req.url);
+  //  // preserve the original path + query so we can bounce back post-login
+  //  url.searchParams.set("next", `${pathname}${search || ""}`);
+  //  return NextResponse.redirect(url);
+  //}
 
   return NextResponse.next();
 }

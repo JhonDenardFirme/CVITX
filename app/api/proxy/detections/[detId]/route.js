@@ -1,3 +1,39 @@
+import { getDetection, patchDetection, deleteDetection } from "@/lib/detections.mock";
+
+export async function GET(_req, { params }) {
+  try {
+    const data = await getDetection(params.id);
+    return Response.json(data);
+  } catch {
+    return new Response("Not found", { status: 404 });
+  }
+}
+
+export async function PATCH(req, { params }) {
+  try {
+    const body = await req.json().catch(() => ({}));
+    const data = await patchDetection(params.id, body);
+    return Response.json(data);
+  } catch {
+    return new Response("Not found", { status: 404 });
+  }
+}
+
+export async function DELETE(_req, { params }) {
+  try {
+    await deleteDetection(params.id);
+    return Response.json({ ok: true });
+  } catch {
+    return new Response("Not found", { status: 404 });
+  }
+}
+
+
+
+
+
+
+/*
 function buildAuthHeaders(req) {
   const headers = {};
   const apiKey = process.env.CVX_API_KEY || "";

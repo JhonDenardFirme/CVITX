@@ -1,3 +1,32 @@
+import { requestEvidence } from "@/lib/detections.mock";
+
+export async function POST(_req, { params }) {
+  const data = await requestEvidence(params.id);
+  return Response.json(data);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
 // NOTE: Backend endpoint for rendered evidence images may return 200 (ready) or 202 (processing).
 // We pass the backend response through verbatim so the client can decide what to do.
 

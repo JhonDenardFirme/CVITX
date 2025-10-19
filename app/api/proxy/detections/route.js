@@ -1,3 +1,23 @@
+import { listDetections } from "@/lib/detections.mock";
+
+export async function GET(req) {
+  const { searchParams } = new URL(req.url);
+  const limit = Number(searchParams.get("limit") || 50);
+  const offset = Number(searchParams.get("offset") || 0);
+  // We ignore other filters in mock; your UI doesn’t require strict filtering to render.
+  const data = await listDetections({ limit, offset });
+  return Response.json(data);
+}
+
+
+
+
+
+
+
+
+/*  DEELETE LATERRRRR
+
 export async function GET(req) {
   // Resolve base URL (prefer API-key mode if configured)
   const rawBase = process.env.CVX_API_BASE_URL || process.env.BACKEND_BASE_URL || "";
@@ -74,3 +94,5 @@ export async function GET(req) {
     });
   }
 }
+
+*/
