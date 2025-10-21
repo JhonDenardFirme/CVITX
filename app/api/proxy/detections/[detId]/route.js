@@ -144,3 +144,4 @@ export async function DELETE(req, { params }) {
     return new Response("Proxy error", { status: 500 });
   }
 }
+*/
