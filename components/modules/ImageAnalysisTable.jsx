@@ -63,7 +63,13 @@ function summarize(d) {
   const type = b?.type || c?.type || null;
   const make = b?.make || c?.make || null;
   const model = b?.model || c?.model || null;
-  const colors = b?.colors?.length ? b.colors : (c?.colors || []);
+
+  // COLORS → keep only the "base" string; if absent, drop
+  // Accepts arrays of either primitives or { finish, base, lightness, conf }
+  const rawColors = (b?.colors?.length ? b.colors : (c?.colors || [])) || [];
+  const colors = rawColors
+    .map((col) => (typeof col === "string" ? col : col?.base))
+    .filter(Boolean);
 
   // a status hint (done/error/processing/etc)
   const status = d?.status || "uploaded";
@@ -264,7 +270,8 @@ export default function ImageAnalysisTable({ workspaceId: wid }) {
 
             {pageItems.map((row) => {
               const s = enriched[row.id] || {};
-              const colorChip = (s.colors || [])[0] || "-";
+              // base-only color (first item) or "-"
+              const colorBase = (s.colors && s.colors.length > 0 ? s.colors[0] : "-") || "-";
               const plate = s?.b?.plate_text || s?.c?.plate_text || "-";
 
               return (
@@ -298,7 +305,7 @@ export default function ImageAnalysisTable({ workspaceId: wid }) {
                   <TableCell className="text-xs">
                     {s.type || "-"} {s.b?.type_conf || s.c?.type_conf ? <span className="text-[10px] text-neutral-400">({p(s.b?.type_conf ?? s.c?.type_conf)})</span> : null}
                   </TableCell>
-                  <TableCell className="text-xs">{String(colorChip).toUpperCase()}</TableCell>
+                  <TableCell className="text-xs">{String(colorBase).toUpperCase()}</TableCell>
                   <TableCell className="text-xs">
                     {s.make || "-"} {s.b?.make_conf || s.c?.make_conf ? <span className="text-[10px] text-neutral-400">({p(s.b?.make_conf ?? s.c?.make_conf)})</span> : null}
                   </TableCell>

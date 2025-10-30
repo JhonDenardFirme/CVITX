@@ -15,9 +15,7 @@ import { iaShow, iaEnqueue } from "@/lib/imageAnalysis";
 import { normalizeVariant } from "@/lib/imageAnalysisNormalize";
 
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis, Tooltip } from "recharts";
-import {
-  ChartContainer,
-} from "@/components/ui/chart";
+import { ChartContainer } from "@/components/ui/chart";
 
 // ⬇️ Aceternity compare
 import { Compare } from "@/components/ui/compare";
@@ -29,19 +27,26 @@ const FRAME =
   "w-full h-64 md:h-80 rounded-lg overflow-hidden border border-neutral-800 bg-black";
 const FRAME_INNER_CENTER = "w-full h-full flex items-center justify-center";
 const IMG = "h-full w-full object-contain";
+const PLATE_FRAME =
+  "w-full h-28 rounded-md overflow-hidden border border-neutral-800 bg-black";
+const PLATE_IMG = "h-full w-full object-contain";
 
-const PARTS_CHART_HEIGHT  = 360;
-const PARTS_LEFT_MARGIN   = 120;
-const PARTS_MIN_BAR       = 8;
-const PARTS_MAX_BAR       = 18;
-const PARTS_MIN_PAIR_GAP  = 6;
+const PARTS_CHART_HEIGHT = 360;
+const PARTS_LEFT_MARGIN = 120;
+const PARTS_MIN_BAR = 8;
+const PARTS_MAX_BAR = 18;
+const PARTS_MIN_PAIR_GAP = 6;
 
 /* ---------- small UI bits ---------- */
 function Field({ label, children, mono }) {
   return (
     <div className="space-y-1">
-      <div className="text-[11px] uppercase tracking-wider text-neutral-400">{label}</div>
-      <div className={["text-sm", mono ? "font-mono" : ""].join(" ")}>{children ?? "—"}</div>
+      <div className="text-[11px] uppercase tracking-wider text-neutral-400">
+        {label}
+      </div>
+      <div className={["text-sm", mono ? "font-mono" : ""].join(" ")}>
+        {children ?? "—"}
+      </div>
     </div>
   );
 }
@@ -53,7 +58,130 @@ function Card({ title, children }) {
     </div>
   );
 }
-const pct = (x) => (x == null ? "—" : `${(Math.max(0, Math.min(1, +x)) * 100).toFixed(1)}%`);
+const pct = (x) =>
+  x == null ? "—" : `${(Math.max(0, Math.min(1, +x)) * 100).toFixed(1)}%`;
+
+/* ---------- Vehicle Colors (rows; chips left, confidence right) ---------- */
+function VehicleColors({ colors }) {
+  // Normalize any incoming shape to an array
+  const list = Array.isArray(colors)
+    ? colors
+    : colors && typeof colors === "object"
+    ? Object.values(colors)
+    : [];
+
+  if (!list || list.length === 0) {
+    return <div className="text-xs text-neutral-500">—</div>;
+  }
+
+  // Safely convert unknown values to short text (avoid [object Object])
+  const textify = (v) => {
+    if (v == null) return null;
+    if (typeof v === "string" || typeof v === "number") return String(v);
+    if (Array.isArray(v)) {
+      const parts = v.map(textify).filter(Boolean);
+      return parts.length ? parts.join(" / ") : null;
+    }
+    if (typeof v === "object") {
+      for (const k of ["label", "name", "value", "text", "code", "id"]) {
+        if (v[k] != null) return String(v[k]);
+      }
+      if (v.hex) return String(v.hex); // DB schema: {hex, p}
+      try {
+        const s = JSON.stringify(v);
+        return s && s.length <= 40 ? s : null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  };
+
+  const rows = list.slice(0, 3);
+  return (
+    <div className="space-y-1">
+      {rows.map((col, i) => {
+        const finish = textify(col?.finish);
+        const base = textify(col?.base);
+        const lightness = textify(col?.lightness);
+        const hex = textify(col?.hex);
+        const chips = [finish, base, lightness].filter(Boolean);
+        // Fallbacks: HEX or primitive item itself
+        if (chips.length === 0) {
+          if (hex) chips.push(hex);
+          else if (typeof col === "string" || typeof col === "number") chips.push(String(col));
+        }
+        const conf = col?.conf ?? col?.p ?? col?.confidence ?? null;
+        return (
+          <div
+            key={i}
+            className="flex items-center justify-between border-b border-neutral-800 py-1"
+          >
+            <div className="flex flex-wrap gap-1">
+              {chips.map((t, j) => (
+                <span
+                  key={`${i}-${j}-${t}`}
+                  className="text-[11px] px-2 py-0.5 rounded bg-neutral-800"
+                >
+                  {t.toString().toUpperCase()}
+                </span>
+              ))}
+            </div>
+            <div className="text-xs text-neutral-400 ml-4 whitespace-nowrap">
+              {pct(conf)}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ---------- Runtime metrics (always 3 values) ---------- */
+function RuntimeMetrics({ v }) {
+  return (
+    <div className="text-xs opacity-80 flex items-center justify-between gap-3">
+      <div>
+        <b>Latency:</b> {v?.latency_ms ?? "—"} ms
+      </div>
+      <div>
+        <b>GFLOPs:</b> {v?.gflops ?? "—"}
+      </div>
+      <div>
+        <b>Memory:</b> {v?.memory_usage != null ? `${v.memory_usage} GB` : "—"}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Type/Make/Model as 2 rows × 3 columns ---------- */
+function TmmGrid({ v }) {
+  return (
+    <div className="text-sm">
+      {/* Row 1: labels */}
+      <div className="grid grid-cols-3 gap-3 text-[11px] uppercase tracking-wider text-neutral-400">
+        <div>Type</div>
+        <div>Make</div>
+        <div>Model</div>
+      </div>
+      {/* Row 2: value left, confidence right */}
+      <div className="grid grid-cols-3 gap-3 mt-1">
+        <div className="flex items-baseline">
+          <span>{v?.type || "—"}</span>
+          <span className="text-[11px] text-neutral-500 ml-2">{pct(v?.type_conf)}</span>
+        </div>
+        <div className="flex items-baseline">
+          <span>{v?.make || "—"}</span>
+          <span className="text-[11px] text-neutral-500 ml-2">{pct(v?.make_conf)}</span>
+        </div>
+        <div className="flex items-baseline">
+          <span>{v?.model || "—"}</span>
+          <span className="text-[11px] text-neutral-500 ml-2">{pct(v?.model_conf)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* ---------- 3-metric vertical chart ---------- */
 function TypeMakeModelChart({ baseline, cmt }) {
@@ -66,14 +194,26 @@ function TypeMakeModelChart({ baseline, cmt }) {
   };
 
   const data = [
-    { metric: "Type",  baseline: toPct100(baseline?.type_conf),  cmt: toPct100(cmt?.type_conf) },
-    { metric: "Make",  baseline: toPct100(baseline?.make_conf),  cmt: toPct100(cmt?.make_conf) },
-    { metric: "Model", baseline: toPct100(baseline?.model_conf), cmt: toPct100(cmt?.model_conf) },
+    {
+      metric: "Type",
+      baseline: toPct100(baseline?.type_conf),
+      cmt: toPct100(cmt?.type_conf),
+    },
+    {
+      metric: "Make",
+      baseline: toPct100(baseline?.make_conf),
+      cmt: toPct100(cmt?.make_conf),
+    },
+    {
+      metric: "Model",
+      baseline: toPct100(baseline?.model_conf),
+      cmt: toPct100(cmt?.model_conf),
+    },
   ];
 
   const chartConfig = {
     baseline: { label: "Baseline", color: "var(--chart-1)" },
-    cmt:      { label: "CMT",      color: "var(--chart-2)" },
+    cmt: { label: "CMT", color: "var(--chart-2)" },
   };
 
   return (
@@ -81,8 +221,13 @@ function TypeMakeModelChart({ baseline, cmt }) {
       <BarChart accessibilityLayer data={data}>
         <CartesianGrid vertical={false} />
         <XAxis dataKey="metric" tickLine={false} tickMargin={10} axisLine={false} />
-        <YAxis tickLine={false} axisLine={false} width={28} tickFormatter={(v) => `${v}%`} domain={[0, 100]} />
-        {/* color-dot tooltip (matching parts tooltip style) */}
+        <YAxis
+          tickLine={false}
+          axisLine={false}
+          width={28}
+          tickFormatter={(v) => `${v}%`}
+          domain={[0, 100]}
+        />
         <Tooltip
           cursor={false}
           content={(props) => {
@@ -92,12 +237,18 @@ function TypeMakeModelChart({ baseline, cmt }) {
               <div className="rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs">
                 <div className="mb-1 font-medium">{d.metric}</div>
                 <div className="flex items-center gap-2">
-                  <span className="inline-block h-2 w-2 rounded-sm" style={{ background: "var(--color-baseline)" }} />
+                  <span
+                    className="inline-block h-2 w-2 rounded-sm"
+                    style={{ background: "var(--color-baseline)" }}
+                  />
                   <span>Baseline</span>
                   <span className="ml-auto text-neutral-300">{d.baseline}%</span>
                 </div>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="inline-block h-2 w-2 rounded-sm" style={{ background: "var(--color-cmt)" }} />
+                  <span
+                    className="inline-block h-2 w-2 rounded-sm"
+                    style={{ background: "var(--color-cmt)" }}
+                  />
                   <span>CMT</span>
                   <span className="ml-auto text-neutral-300">{d.cmt}%</span>
                 </div>
@@ -106,9 +257,8 @@ function TypeMakeModelChart({ baseline, cmt }) {
           }}
           wrapperStyle={{ outline: "none" }}
         />
-        {/* Bars use global color tokens (not hard-coded) */}
         <Bar dataKey="baseline" name="Baseline" fill="var(--color-baseline)" radius={4} />
-        <Bar dataKey="cmt"      name="CMT"      fill="var(--color-cmt)"      radius={4} />
+        <Bar dataKey="cmt" name="CMT" fill="var(--color-cmt)" radius={4} />
       </BarChart>
     </ChartContainer>
   );
@@ -147,22 +297,22 @@ function PartsConfidenceChart({ baselineParts, cmtParts }) {
   const rows = names.map((name) => ({
     name,
     baseline: Math.round((bMap.get(name) ?? 0) * 100),
-    cmt:      Math.round((cMap.get(name) ?? 0) * 100),
+    cmt: Math.round((cMap.get(name) ?? 0) * 100),
   }));
 
-  const count   = rows.length;
-  const usable  = PARTS_CHART_HEIGHT - 40;
-  const estBar  = Math.floor(usable / (count * 3.2));
+  const count = rows.length;
+  const usable = PARTS_CHART_HEIGHT - 40;
+  const estBar = Math.floor(usable / (count * 3.2));
   const barSize = Math.max(PARTS_MIN_BAR, Math.min(PARTS_MAX_BAR, estBar));
   const pairGap = Math.max(PARTS_MIN_PAIR_GAP, Math.floor(barSize * 0.6));
   const catGapPct = Math.max(16, Math.min(36, Math.round(42 - (count - 3) * 3)));
-  const catGap    = `${catGapPct}%`;
+  const catGap = `${catGapPct}%`;
 
   return (
     <ChartContainer
       config={{
         baseline: { label: "Baseline", color: "var(--chart-1)" },
-        cmt:      { label: "CMT",      color: "var(--chart-2)" },
+        cmt: { label: "CMT", color: "var(--chart-2)" },
       }}
       className="w-full"
       style={{ height: PARTS_CHART_HEIGHT }}
@@ -186,12 +336,18 @@ function PartsConfidenceChart({ baselineParts, cmtParts }) {
               <div className="rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs">
                 <div className="mb-1 font-medium">Part: {p.name}</div>
                 <div className="flex items-center gap-2">
-                  <span className="inline-block h-2 w-2 rounded-sm" style={{ background: "var(--color-baseline)" }} />
+                  <span
+                    className="inline-block h-2 w-2 rounded-sm"
+                    style={{ background: "var(--color-baseline)" }}
+                  />
                   <span>Baseline</span>
                   <span className="ml-auto text-neutral-300">{p.baseline}%</span>
                 </div>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="inline-block h-2 w-2 rounded-sm" style={{ background: "var(--color-cmt)" }} />
+                  <span
+                    className="inline-block h-2 w-2 rounded-sm"
+                    style={{ background: "var(--color-cmt)" }}
+                  />
                   <span>CMT</span>
                   <span className="ml-auto text-neutral-300">{p.cmt}%</span>
                 </div>
@@ -201,7 +357,7 @@ function PartsConfidenceChart({ baselineParts, cmtParts }) {
           wrapperStyle={{ outline: "none" }}
         />
         <Bar dataKey="baseline" name="Baseline" fill="var(--color-baseline)" barSize={barSize} radius={5} />
-        <Bar dataKey="cmt"      name="CMT"      fill="var(--color-cmt)"      barSize={barSize} radius={5} />
+        <Bar dataKey="cmt" name="CMT" fill="var(--color-cmt)" barSize={barSize} radius={5} />
       </BarChart>
     </ChartContainer>
   );
@@ -246,29 +402,23 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
   const b = data?.results?.baseline || null;
   const c = data?.results?.cmt || null;
 
-  const bColors = useMemo(
-    () => (Array.isArray(b?.colors) ? b.colors.map((x) => String(x).toUpperCase()) : []),
-    [b?.colors]
-  );
-  const cColors = useMemo(
-    () => (Array.isArray(c?.colors) ? c.colors.map((x) => String(x).toUpperCase()) : []),
-    [c?.colors]
-  );
-
   // helper for toggle button styling
   const toggleClass = (active) =>
-    active ? "bg-orange-500 text-black hover:bg-orange-500" : "";
+    active ? "bg-orange-500 text-white hover:bg-orange-500" : "";
 
   const originalUrl = data?.input_image?.url || null;
   const bUrl = b?.annotated_image?.url || null;
   const cUrl = c?.annotated_image?.url || null;
+  const bPlateUrl = b?.plate_image?.url || null;
+  const cPlateUrl = c?.plate_image?.url || null;
 
   return (
     <DialogContent className="sm:max-w-[1080px] max-h-[85vh] overflow-y-auto z-[70]">
       <DialogHeader className="pb-2">
         <DialogTitle className="text-lg">Analysis Details</DialogTitle>
         <DialogDescription>
-          Baseline vs CMT side-by-side. Review attributes, annotated images, parts, and confidence comparisons.
+          Baseline vs CMT side-by-side. Review attributes, annotated images, parts, and confidence
+          comparisons.
         </DialogDescription>
       </DialogHeader>
 
@@ -363,7 +513,9 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
                     onError={() => setImgErr((s) => ({ ...s, b: true }))}
                   />
                 ) : (
-                  <div className="text-xs text-neutral-600">Baseline Visualization</div>
+                  <div className={`${FRAME_INNER_CENTER} text-xs text-neutral-600`}>
+                    Baseline Visualization
+                  </div>
                 )}
               </div>
             )}
@@ -380,7 +532,9 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
                     onError={() => setImgErr((s) => ({ ...s, c: true }))}
                   />
                 ) : (
-                  <div className="text-xs text-neutral-600">CMT Visualization</div>
+                  <div className={`${FRAME_INNER_CENTER} text-xs text-neutral-600`}>
+                    CMT Visualization
+                  </div>
                 )}
               </div>
             )}
@@ -434,39 +588,39 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
                 )}
               </div>
 
-              <Field label="Type">
-                {b?.type || "—"} <span className="text-[11px] text-neutral-400">({pct(b?.type_conf)})</span>
-              </Field>
-              <Field label="Make">
-                {b?.make || "—"} <span className="text-[11px] text-neutral-400">({pct(b?.make_conf)})</span>
-              </Field>
-              <Field label="Model">
-                {b?.model || "—"} <span className="text-[11px] text-neutral-400">({pct(b?.model_conf)})</span>
-              </Field>
+              {/* New 2-row, 3-col T/M/M */}
+              <TmmGrid v={b} />
 
-              <Field label="Plate" mono>{b?.plate_text || "—"}</Field>
-
-              <Field label="Colors">
-                <div className="flex flex-wrap gap-1">
-                  {bColors.map((x) => (
-                    <span key={x} className="text-[11px] px-2 py-0.5 rounded bg-neutral-800">
-                      {x}
-                    </span>
-                  ))}
-                  {bColors.length === 0 && <span className="text-xs text-neutral-500">—</span>}
+              {/* Plate row + image slot */}
+              <Field label="Plate">
+                <div className="flex items-baseline">
+                  <span className="">{b?.plate_text || "—"}</span>
+                  <span className="text-[11px] text-neutral-500 ml-2">{pct(b?.plate_conf)}</span>
                 </div>
+                <div className={`${PLATE_FRAME} mt-2`}>
+                  {bPlateUrl ? (
+                    <img src={bPlateUrl} alt="Plate crop" className={PLATE_IMG} loading="eager" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-xs text-neutral-600">
+                      No plate crop
+                    </div>
+                  )}
+                </div>
+              </Field>
+
+              <Field label="Vehicle Colors">
+                <VehicleColors colors={b?.colors} />
               </Field>
 
               <Field label="Parts">
                 <PartsList parts={b?.parts} />
               </Field>
 
-              <div className="text-xs opacity-80 space-x-3">
-                <span><b>Latency:</b> {b?.latency_ms ?? "—"} ms</span>
-                <span><b>GFLOPs:</b> {b?.gflops ?? "—"}</span>
-              </div>
+              <RuntimeMetrics v={b} />
 
-              {b?.status === "error" && b?.error_msg && <div className="text-xs text-red-500">{b.error_msg}</div>}
+              {b?.status === "error" && b?.error_msg && (
+                <div className="text-xs text-red-500">{b.error_msg}</div>
+              )}
             </Card>
 
             {/* CMT */}
@@ -487,39 +641,39 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
                 )}
               </div>
 
-              <Field label="Type">
-                {c?.type || "—"} <span className="text-[11px] text-neutral-400">({pct(c?.type_conf)})</span>
-              </Field>
-              <Field label="Make">
-                {c?.make || "—"} <span className="text-[11px] text-neutral-400">({pct(c?.make_conf)})</span>
-              </Field>
-              <Field label="Model">
-                {c?.model || "—"} <span className="text-[11px] text-neutral-400">({pct(c?.model_conf)})</span>
-              </Field>
+              {/* New 2-row, 3-col T/M/M */}
+              <TmmGrid v={c} />
 
-              <Field label="Plate" mono>{c?.plate_text || "—"}</Field>
-
-              <Field label="Colors">
-                <div className="flex flex-wrap gap-1">
-                  {cColors.map((x) => (
-                    <span key={x} className="text-[11px] px-2 py-0.5 rounded bg-neutral-800">
-                      {x}
-                    </span>
-                  ))}
-                  {cColors.length === 0 && <span className="text-xs text-neutral-500">—</span>}
+              {/* Plate row + image slot */}
+              <Field label="Plate">
+                <div className="flex items-baseline">
+                  <span className="font-mono">{c?.plate_text || "—"}</span>
+                  <span className="text-[11px] text-neutral-500 ml-2">{pct(c?.plate_conf)}</span>
                 </div>
+                <div className={`${PLATE_FRAME} mt-2`}>
+                  {cPlateUrl ? (
+                    <img src={cPlateUrl} alt="Plate crop" className={PLATE_IMG} loading="eager" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-xs text-neutral-600">
+                      No plate crop
+                    </div>
+                  )}
+                </div>
+              </Field>
+
+              <Field label="Vehicle Colors">
+                <VehicleColors colors={c?.colors} />
               </Field>
 
               <Field label="Parts">
                 <PartsList parts={c?.parts} />
               </Field>
 
-              <div className="text-xs opacity-80 space-x-3">
-                <span><b>Latency:</b> {c?.latency_ms ?? "—"} ms</span>
-                <span><b>GFLOPs:</b> {c?.gflops ?? "—"}</span>
-              </div>
+              <RuntimeMetrics v={c} />
 
-              {c?.status === "error" && c?.error_msg && <div className="text-xs text-red-500">{c.error_msg}</div>}
+              {c?.status === "error" && c?.error_msg && (
+                <div className="text-xs text-red-500">{c.error_msg}</div>
+              )}
             </Card>
           </div>
 
@@ -557,7 +711,7 @@ function PartsList({ parts }) {
           className="flex items-center justify-between border-b border-neutral-800 py-1"
         >
           <span>{p?.name || "Part"}</span>
-          <span className="text-xs text-neutral-400">{pct(p?.conf)}</span>
+          <span className="text-xs text-[11px] text-neutral-500">{pct(p?.conf)}</span>
         </li>
       ))}
     </ul>
