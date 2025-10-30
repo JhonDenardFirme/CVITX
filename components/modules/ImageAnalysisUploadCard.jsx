@@ -42,6 +42,13 @@ export default function ImageAnalysisUploadCard({ workspaceId: widProp }) {
     }
   }, [open]);
 
+  const fmtBytes = (b) => {
+    if (typeof b !== "number") return "";
+    if (b < 1024) return `${b} B`;
+    if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+    return `${(b / (1024 * 1024)).toFixed(2)} MB`;
+  };
+
   async function processOne(file, idx) {
     const update = (patch) =>
       setQueue((q) => {
@@ -53,12 +60,30 @@ export default function ImageAnalysisUploadCard({ workspaceId: widProp }) {
     try {
       update({ name: file.name, status: "presigning", step: "Presigning…", progress: 0 });
 
+      const requestedType = file.type || "image/jpeg";
       const pre = await iaPresign(wid, {
         filename: file.name,
-        content_type: file.type || "image/jpeg",
-        title: title || null,
-        description: description || null,
+        content_type: requestedType,
+        title: title || null,          // ← batch Title applied to this file
+        description: description || null, // ← batch Description applied to this file
       });
+
+      // ── Guardrail #1: Content-Type must match presign ──
+      const requiredType = pre?.content_type || requestedType;
+      if (requiredType && requestedType !== requiredType) {
+        const msg = `Wrong file type for "${file.name}": selected ${requestedType || "(none)"} but required ${requiredType}. Please re-select a matching file.`;
+        update({ status: "error", step: "Wrong file type", error: msg, progress: 0 });
+        toast("File type mismatch", { description: msg });
+        return { ok: false };
+      }
+
+      // ── Guardrail #2: Max size check if API provides pre.max_bytes ──
+      if (typeof pre?.max_bytes === "number" && file.size > pre.max_bytes) {
+        const msg = `File too large for "${file.name}": ${fmtBytes(file.size)} > limit ${fmtBytes(pre.max_bytes)}.`;
+        update({ status: "error", step: "File too large", error: msg, progress: 0 });
+        toast("File too large", { description: msg });
+        return { ok: false };
+      }
 
       update({ status: "uploading", step: "Uploading to S3…", progress: 1 });
       await putToS3WithProgress(pre.url, file, (p) => update({ progress: p }));
@@ -66,10 +91,10 @@ export default function ImageAnalysisUploadCard({ workspaceId: widProp }) {
       update({ status: "committing", step: "Committing…", progress: 100 });
       const commit = await iaCommit(wid, {
         key: pre.key,
-        content_type: file.type || "image/jpeg",
+        content_type: requestedType,
         size_bytes: file.size,
-        title: title || null,
-        description: description || null,
+        title: title || null,          // ← same batch Title
+        description: description || null, // ← same batch Description
       });
 
       update({ status: "enqueuing", step: "Enqueuing Baseline & CMT…" });
@@ -77,9 +102,11 @@ export default function ImageAnalysisUploadCard({ workspaceId: widProp }) {
 
       update({ status: "queued", step: "Queued", id: commit.id, analysis_no: commit.analysis_no });
       toast(`Queued #${commit.analysis_no} — ${file.name}`);
+      return { ok: true };
     } catch (e) {
       update({ status: "error", step: "Error", error: e?.message || "Upload failed" });
       toast("Upload failed", { description: String(e?.message || "") });
+      return { ok: false };
     }
   }
 
@@ -95,13 +122,27 @@ export default function ImageAnalysisUploadCard({ workspaceId: widProp }) {
 
     setUploading(true);
     setQueue(files.map((f) => ({ name: f.name, status: "waiting", step: "Waiting…", progress: 0 })));
+
+    let okCount = 0;
+    let failCount = 0;
+
     try {
-      // SERIAL per workspace (important!)
+      // SERIAL per workspace (important!): strictly one-by-one
       for (let i = 0; i < files.length; i++) {
-        await processOne(files[i], i);
+        const result = await processOne(files[i], i);
+        if (result?.ok) okCount += 1;
+        else failCount += 1;
       }
-      setOpen(false);
-      toast("All uploads queued");
+
+      // Close only if all succeeded; otherwise keep dialog open so user sees errors
+      if (failCount === 0) {
+        setOpen(false);
+        toast(`All ${okCount} uploads queued`);
+      } else {
+        toast("Batch finished with issues", {
+          description: `${okCount} succeeded, ${failCount} failed. Check the list for details.`,
+        });
+      }
     } finally {
       setUploading(false);
     }
@@ -118,7 +159,13 @@ export default function ImageAnalysisUploadCard({ workspaceId: widProp }) {
         </div>
 
         {/* Upload dialog trigger (same button) */}
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog
+          open={open}
+          onOpenChange={(v) => {
+            // Prevent closing while uploading, so the user sees per-file results
+            if (!uploading) setOpen(v);
+          }}
+        >
           <DialogTrigger asChild>
             <button className="text-sm px-4 py-2 gap-2 bg-orange-500 text-white rounded-md hover:bg-orange-400 flex flex-row items-center justify-center">
               <UploadIcon size={14} />
@@ -131,7 +178,11 @@ export default function ImageAnalysisUploadCard({ workspaceId: widProp }) {
               <DialogHeader>
                 <DialogTitle>Upload Images for Analysis</DialogTitle>
                 <DialogDescription>
-                  You can attach multiple images. They’ll be uploaded and enqueued **one by one** per workspace.
+                  You can attach multiple images. They’ll be uploaded and enqueued <strong>one by one</strong> per workspace.
+                  <br />
+                  <span className="opacity-70">
+                    The Title and Description you set here will be applied to <strong>every</strong> image in this batch.
+                  </span>
                 </DialogDescription>
               </DialogHeader>
 
@@ -181,7 +232,7 @@ export default function ImageAnalysisUploadCard({ workspaceId: widProp }) {
                   />
                 </div>
                 <p className="text-xs text-neutral-400">
-                  PNG / JPG / WEBP. Files will be sent one-by-one and enqueued for Baseline & CMT.
+                  PNG / JPG / WEBP. Files will be sent one-by-one and enqueued for Baseline &amp; CMT.
                 </p>
               </div>
 
