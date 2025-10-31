@@ -27,7 +27,7 @@ const PLATE_FRAME =
   "w-full h-28 rounded-md overflow-hidden border border-neutral-800 bg-black";
 const PLATE_IMG = "h-full w-full object-contain";
 
-const PARTS_CHART_HEIGHT = 360;
+const PARTS_CHART_HEIGHT = 600;
 const PARTS_LEFT_MARGIN = 120;
 const PARTS_MIN_BAR = 8;
 const PARTS_MAX_BAR = 18;
