@@ -1,3 +1,4 @@
+// File: components/modules/ImageAnalysisDetailsDialog.jsx
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
@@ -16,13 +17,8 @@ import { normalizeVariant } from "@/lib/imageAnalysisNormalize";
 
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis, Tooltip } from "recharts";
 import { ChartContainer } from "@/components/ui/chart";
-
-// ⬇️ Aceternity compare
 import { Compare } from "@/components/ui/compare";
 
-/* ────────────────────────────────────────────────────────────────────────────
-   ⚙️ TUNE THESE TO ADJUST GRAPH SIZES / SPACING (charts)
-   ──────────────────────────────────────────────────────────────────────────── */
 const FRAME =
   "w-full h-64 md:h-80 rounded-lg overflow-hidden border border-neutral-800 bg-black";
 const FRAME_INNER_CENTER = "w-full h-full flex items-center justify-center";
@@ -37,7 +33,6 @@ const PARTS_MIN_BAR = 8;
 const PARTS_MAX_BAR = 18;
 const PARTS_MIN_PAIR_GAP = 6;
 
-/* ---------- small UI bits ---------- */
 function Field({ label, children, mono }) {
   return (
     <div className="space-y-1">
@@ -50,6 +45,7 @@ function Field({ label, children, mono }) {
     </div>
   );
 }
+
 function Card({ title, children }) {
   return (
     <div className="rounded-lg border border-neutral-800 bg-neutral-950/60 p-3">
@@ -58,12 +54,11 @@ function Card({ title, children }) {
     </div>
   );
 }
+
 const pct = (x) =>
   x == null ? "—" : `${(Math.max(0, Math.min(1, +x)) * 100).toFixed(1)}%`;
 
-/* ---------- Vehicle Colors (rows; chips left, confidence right) ---------- */
 function VehicleColors({ colors }) {
-  // Normalize any incoming shape to an array
   const list = Array.isArray(colors)
     ? colors
     : colors && typeof colors === "object"
@@ -74,7 +69,6 @@ function VehicleColors({ colors }) {
     return <div className="text-xs text-neutral-500">—</div>;
   }
 
-  // Safely convert unknown values to short text (avoid [object Object])
   const textify = (v) => {
     if (v == null) return null;
     if (typeof v === "string" || typeof v === "number") return String(v);
@@ -86,7 +80,7 @@ function VehicleColors({ colors }) {
       for (const k of ["label", "name", "value", "text", "code", "id"]) {
         if (v[k] != null) return String(v[k]);
       }
-      if (v.hex) return String(v.hex); // DB schema: {hex, p}
+      if (v.hex) return String(v.hex);
       try {
         const s = JSON.stringify(v);
         return s && s.length <= 40 ? s : null;
@@ -106,10 +100,10 @@ function VehicleColors({ colors }) {
         const lightness = textify(col?.lightness);
         const hex = textify(col?.hex);
         const chips = [finish, base, lightness].filter(Boolean);
-        // Fallbacks: HEX or primitive item itself
         if (chips.length === 0) {
           if (hex) chips.push(hex);
-          else if (typeof col === "string" || typeof col === "number") chips.push(String(col));
+          else if (typeof col === "string" || typeof col === "number")
+            chips.push(String(col));
         }
         const conf = col?.conf ?? col?.p ?? col?.confidence ?? null;
         return (
@@ -137,7 +131,6 @@ function VehicleColors({ colors }) {
   );
 }
 
-/* ---------- Runtime metrics (always 3 values) ---------- */
 function RuntimeMetrics({ v }) {
   return (
     <div className="text-xs opacity-80 flex items-center justify-between gap-3">
@@ -154,36 +147,38 @@ function RuntimeMetrics({ v }) {
   );
 }
 
-/* ---------- Type/Make/Model as 2 rows × 3 columns ---------- */
 function TmmGrid({ v }) {
   return (
     <div className="text-sm">
-      {/* Row 1: labels */}
       <div className="grid grid-cols-3 gap-3 text-[11px] uppercase tracking-wider text-neutral-400">
         <div>Type</div>
         <div>Make</div>
         <div>Model</div>
       </div>
-      {/* Row 2: value left, confidence right */}
       <div className="grid grid-cols-3 gap-3 mt-1">
         <div className="flex items-baseline">
           <span>{v?.type || "—"}</span>
-          <span className="text-[11px] text-neutral-500 ml-2">{pct(v?.type_conf)}</span>
+          <span className="text-[11px] text-neutral-500 ml-2">
+            {pct(v?.type_conf)}
+          </span>
         </div>
         <div className="flex items-baseline">
           <span>{v?.make || "—"}</span>
-          <span className="text-[11px] text-neutral-500 ml-2">{pct(v?.make_conf)}</span>
+          <span className="text-[11px] text-neutral-500 ml-2">
+            {pct(v?.make_conf)}
+          </span>
         </div>
         <div className="flex items-baseline">
           <span>{v?.model || "—"}</span>
-          <span className="text-[11px] text-neutral-500 ml-2">{pct(v?.model_conf)}</span>
+          <span className="text-[11px] text-neutral-500 ml-2">
+            {pct(v?.model_conf)}
+          </span>
         </div>
       </div>
     </div>
   );
 }
 
-/* ---------- 3-metric vertical chart ---------- */
 function TypeMakeModelChart({ baseline, cmt }) {
   if (!baseline && !cmt) return null;
 
@@ -264,7 +259,6 @@ function TypeMakeModelChart({ baseline, cmt }) {
   );
 }
 
-/* ---------- Parts Confidence (HORIZONTAL • SIDE-BY-SIDE with clear spacing) ---------- */
 function PartsConfidenceChart({ baselineParts, cmtParts }) {
   const names = useMemo(
     () =>
@@ -285,10 +279,13 @@ function PartsConfidenceChart({ baselineParts, cmtParts }) {
     );
   }
 
-  const to01 = (x) => (x == null || Number.isNaN(+x) ? 0 : Math.max(0, Math.min(1, +x)));
+  const to01 = (x) =>
+    x == null || Number.isNaN(+x) ? 0 : Math.max(0, Math.min(1, +x));
   const mapParts = (arr) => {
     const m = new Map();
-    (arr || []).forEach((p) => m.set((p?.name || "").toString(), to01(p?.conf)));
+    (arr || []).forEach((p) =>
+      m.set((p?.name || "").toString(), to01(p?.conf))
+    );
     return m;
   };
   const bMap = mapParts(baselineParts);
@@ -326,7 +323,13 @@ function PartsConfidenceChart({ baselineParts, cmtParts }) {
         barGap={pairGap}
       >
         <XAxis type="number" hide domain={[0, 100]} />
-        <YAxis dataKey="name" type="category" tickLine={false} tickMargin={10} axisLine={false} />
+        <YAxis
+          dataKey="name"
+          type="category"
+          tickLine={false}
+          tickMargin={10}
+          axisLine={false}
+        />
         <Tooltip
           cursor={false}
           content={(props) => {
@@ -356,21 +359,33 @@ function PartsConfidenceChart({ baselineParts, cmtParts }) {
           }}
           wrapperStyle={{ outline: "none" }}
         />
-        <Bar dataKey="baseline" name="Baseline" fill="var(--color-baseline)" barSize={barSize} radius={5} />
-        <Bar dataKey="cmt" name="CMT" fill="var(--color-cmt)" barSize={barSize} radius={5} />
+        <Bar
+          dataKey="baseline"
+          name="Baseline"
+          fill="var(--color-baseline)"
+          barSize={barSize}
+          radius={5}
+        />
+        <Bar
+          dataKey="cmt"
+          name="CMT"
+          fill="var(--color-cmt)"
+          barSize={barSize}
+          radius={5}
+        />
       </BarChart>
     </ChartContainer>
   );
 }
 
-/* =================================================================== */
-
-export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, open }) {
+export default function ImageAnalysisDetailsDialog({
+  workspaceId,
+  analysisId,
+  open,
+}) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [imgErr, setImgErr] = useState({ orig: false, b: false, c: false });
-
-  // 👇 top image toggle
   const [view, setView] = useState("original"); // "original" | "baseline" | "cmt" | "compare"
 
   const fetchOnce = useCallback(async () => {
@@ -378,8 +393,24 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
     setLoading(true);
     try {
       const d = await iaShow(workspaceId, analysisId);
+      try {
+        console.debug("[IA SHOW]", { workspaceId, analysisId, data: d });
+      } catch {}
       const normB = normalizeVariant(d?.results?.baseline);
       const normC = normalizeVariant(d?.results?.cmt);
+      try {
+        console.debug("[IA PARTS]", {
+          analysisId,
+          baseline: {
+            count: Array.isArray(normB?.parts) ? normB.parts.length : 0,
+            parts: normB?.parts || [],
+          },
+          cmt: {
+            count: Array.isArray(normC?.parts) ? normC.parts.length : 0,
+            parts: normC?.parts || [],
+          },
+        });
+      } catch {}
       setData({ ...d, results: { baseline: normB, cmt: normC } });
     } finally {
       setLoading(false);
@@ -402,7 +433,6 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
   const b = data?.results?.baseline || null;
   const c = data?.results?.cmt || null;
 
-  // helper for toggle button styling
   const toggleClass = (active) =>
     active ? "bg-orange-500 text-white hover:bg-orange-500" : "";
 
@@ -417,8 +447,8 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
       <DialogHeader className="pb-2">
         <DialogTitle className="text-lg">Analysis Details</DialogTitle>
         <DialogDescription>
-          Baseline vs CMT side-by-side. Review attributes, annotated images, parts, and confidence
-          comparisons.
+          Baseline vs CMT side-by-side. Review attributes, annotated images,
+          parts, and confidence comparisons.
         </DialogDescription>
       </DialogHeader>
 
@@ -434,9 +464,7 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Actions */}
           <div className="flex items-center justify-between gap-2">
-            {/* Top image toggles */}
             <div className="flex items-center gap-1">
               <Button
                 size="sm"
@@ -473,7 +501,11 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
             </div>
 
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => iaEnqueue(workspaceId, analysisId)}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => iaEnqueue(workspaceId, analysisId)}
+              >
                 <Repeat className="mr-2 h-4 w-4" /> Re-run
               </Button>
               <Button variant="secondary" size="sm" onClick={refresh}>
@@ -482,9 +514,7 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
             </div>
           </div>
 
-          {/* Top image frame */}
           <div className={FRAME}>
-            {/* ORIGINAL */}
             {view === "original" && (
               <div className={FRAME_INNER_CENTER}>
                 {originalUrl && !imgErr.orig ? (
@@ -501,7 +531,6 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
               </div>
             )}
 
-            {/* BASELINE */}
             {view === "baseline" && (
               <div className={FRAME_INNER_CENTER}>
                 {bUrl && !imgErr.b ? (
@@ -520,7 +549,6 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
               </div>
             )}
 
-            {/* CMT */}
             {view === "cmt" && (
               <div className={FRAME_INNER_CENTER}>
                 {cUrl && !imgErr.c ? (
@@ -539,7 +567,6 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
               </div>
             )}
 
-            {/* COMPARE (Aceternity) */}
             {view === "compare" && (
               <div className="w-full h-full">
                 {bUrl && cUrl ? (
@@ -547,20 +574,22 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
                     firstImage={bUrl}
                     secondImage={cUrl}
                     firstImageClassName="object-contain"
-                    /* NOTE: component prop is spelled this way in their example */
                     secondImageClassname="object-contain"
                     className="w-full h-full"
                     slideMode="hover"
                   />
                 ) : (
-                  // Fallback split with labels when one/both imgs are missing
                   <div className="w-full h-full flex">
                     <div className="flex-1 flex items-center justify-center">
-                      <span className="text-xs text-neutral-600">Baseline Visualization</span>
+                      <span className="text-xs text-neutral-600">
+                        Baseline Visualization
+                      </span>
                     </div>
                     <div className="w-px bg-neutral-800" />
                     <div className="flex-1 flex items-center justify-center">
-                      <span className="text-xs text-neutral-600">CMT Visualization</span>
+                      <span className="text-xs text-neutral-600">
+                        CMT Visualization
+                      </span>
                     </div>
                   </div>
                 )}
@@ -568,9 +597,7 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
             )}
           </div>
 
-          {/* Baseline / CMT panels */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Baseline */}
             <Card title="Baseline">
               <div className={FRAME}>
                 {bUrl && !imgErr.b ? (
@@ -588,18 +615,23 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
                 )}
               </div>
 
-              {/* New 2-row, 3-col T/M/M */}
               <TmmGrid v={b} />
 
-              {/* Plate row + image slot */}
               <Field label="Plate">
                 <div className="flex items-baseline">
                   <span className="">{b?.plate_text || "—"}</span>
-                  <span className="text-[11px] text-neutral-500 ml-2">{pct(b?.plate_conf)}</span>
+                  <span className="text-[11px] text-neutral-500 ml-2">
+                    {pct(b?.plate_conf)}
+                  </span>
                 </div>
                 <div className={`${PLATE_FRAME} mt-2`}>
                   {bPlateUrl ? (
-                    <img src={bPlateUrl} alt="Plate crop" className={PLATE_IMG} loading="eager" />
+                    <img
+                      src={bPlateUrl}
+                      alt="Plate crop"
+                      className={PLATE_IMG}
+                      loading="eager"
+                    />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-xs text-neutral-600">
                       No plate crop
@@ -623,7 +655,6 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
               )}
             </Card>
 
-            {/* CMT */}
             <Card title="CMT">
               <div className={FRAME}>
                 {cUrl && !imgErr.c ? (
@@ -641,18 +672,23 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
                 )}
               </div>
 
-              {/* New 2-row, 3-col T/M/M */}
               <TmmGrid v={c} />
 
-              {/* Plate row + image slot */}
               <Field label="Plate">
                 <div className="flex items-baseline">
                   <span className="font-mono">{c?.plate_text || "—"}</span>
-                  <span className="text-[11px] text-neutral-500 ml-2">{pct(c?.plate_conf)}</span>
+                  <span className="text-[11px] text-neutral-500 ml-2">
+                    {pct(c?.plate_conf)}
+                  </span>
                 </div>
                 <div className={`${PLATE_FRAME} mt-2`}>
                   {cPlateUrl ? (
-                    <img src={cPlateUrl} alt="Plate crop" className={PLATE_IMG} loading="eager" />
+                    <img
+                      src={cPlateUrl}
+                      alt="Plate crop"
+                      className={PLATE_IMG}
+                      loading="eager"
+                    />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-xs text-neutral-600">
                       No plate crop
@@ -677,7 +713,6 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
             </Card>
           </div>
 
-          {/* Charts row */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Card title="Confidence — Type / Make / Model">
               <TypeMakeModelChart baseline={b} cmt={c} />
@@ -698,7 +733,6 @@ export default function ImageAnalysisDetailsDialog({ workspaceId, analysisId, op
   );
 }
 
-/* ---------- tiny PartsList used above ---------- */
 function PartsList({ parts }) {
   if (!Array.isArray(parts) || parts.length === 0) {
     return <div className="text-xs text-neutral-500">No parts.</div>;
@@ -711,7 +745,9 @@ function PartsList({ parts }) {
           className="flex items-center justify-between border-b border-neutral-800 py-1"
         >
           <span>{p?.name || "Part"}</span>
-          <span className="text-xs text-[11px] text-neutral-500">{pct(p?.conf)}</span>
+          <span className="text-xs text-[11px] text-neutral-500">
+            {pct(p?.conf)}
+          </span>
         </li>
       ))}
     </ul>

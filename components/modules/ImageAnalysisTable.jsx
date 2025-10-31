@@ -1,6 +1,8 @@
+// components/modules/ImageAnalysisTable.jsx
+
 "use client";
 
-import { useEffect, useMemo, useState, Fragment } from "react";
+import { useEffect, useMemo, useState, useCallback, Fragment } from "react";
 import Link from "next/link";
 import { useAppStore } from "@/lib/store";
 
@@ -88,41 +90,63 @@ export default function ImageAnalysisTable({ workspaceId: wid }) {
     type: [], color: [], make: [], model: [], plate: "",
   });
 
-  const [all, setAll] = useState([]);          // list endpoint result (parents only)
+  const [all, setAll] = useState([]);           // list endpoint result (parents only)
   const [enriched, setEnriched] = useState({}); // id -> summary from iaShow
   const [loading, setLoading] = useState(false);
 
-  // paging
+  // paging (client-side over the fetched list)
   const [page, setPage] = useState(1);
   const itemsPerPage = 20;
 
   // details dialog
   const [openId, setOpenId] = useState(null);
 
-  useEffect(() => {
-    let ignore = false;
-    (async () => {
-      if (!wid) return;
-      setLoading(true);
-      try {
-        const list = await iaList(wid);
-        const rows = Array.isArray(list) ? list : (list?.items || []);
-        if (!ignore) setAll(rows);
+  // ───────────────────────────────────────────────────────────
+  // Pagination fix: fetch a larger list so client-side paging works
+  // ───────────────────────────────────────────────────────────
+  const LIST_LIMIT = 500;
 
-        // lazily enrich visible chunk for badges & snapshot
-        const first = rows.slice(0, 30);
-        for (const r of first) {
-          try {
-            const d = await iaShow(wid, r.id);
-            if (!ignore) setEnriched((m) => ({ ...m, [r.id]: summarize(d) }));
-          } catch {}
-        }
-      } finally {
-        if (!ignore) setLoading(false);
+  // Single refetch function we can call on mount and on 'ia:refresh' events
+  const refetch = useCallback(async () => {
+    if (!wid) return;
+    let ignore = false;
+    setLoading(true);
+    try {
+      const list = await iaList(wid, { limit: LIST_LIMIT, offset: 0 });
+      const rows = Array.isArray(list) ? list : (list?.items || []);
+      if (!ignore) setAll(rows);
+
+      // pre-enrich first page worth (or up to 30) so badges/snapshot render quickly
+      const start = (page - 1) * itemsPerPage;
+      const chunk = rows.slice(start, start + Math.max(itemsPerPage, 30));
+      for (const r of chunk) {
+        if (ignore) break;
+        if (enriched[r.id]) continue;
+        try {
+          const d = await iaShow(wid, r.id);
+          if (!ignore) setEnriched((m) => ({ ...m, [r.id]: summarize(d) }));
+        } catch {}
       }
-    })();
-    return () => { ignore = true; };
-  }, [wid]);
+    } finally {
+      setLoading(false);
+    }
+    // (no cleanup return from useCallback)
+  }, [wid, page, enriched]);
+
+  // Initial load
+  useEffect(() => { refetch(); }, [refetch]);
+
+  // Listen for uploads finishing (from the upload dialog) and re-fetch
+  useEffect(() => {
+    if (!wid) return;
+    const onRefresh = (e) => {
+      const targetWid = e?.detail?.wid;
+      if (targetWid && targetWid !== wid) return; // ignore events for other workspaces
+      refetch();
+    };
+    window.addEventListener("ia:refresh", onRefresh);
+    return () => window.removeEventListener("ia:refresh", onRefresh);
+  }, [wid, refetch]);
 
   // re-enrich when moving pages (lazy)
   useEffect(() => {
@@ -331,6 +355,8 @@ export default function ImageAnalysisTable({ workspaceId: wid }) {
                           await iaEnqueue(wid, row.id);
                           // Optimistic status flip
                           setAll((prev) => prev.map((x) => (x.id === row.id ? { ...x, status: "queued" } : x)));
+                          // Also prompt a background refresh so we pick up any server-side changes
+                          try { window.dispatchEvent(new CustomEvent("ia:refresh", { detail: { wid } })); } catch {}
                         } catch {}
                       }}
                     >

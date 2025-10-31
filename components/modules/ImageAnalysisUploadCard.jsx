@@ -1,3 +1,5 @@
+// components/modules/ImageAnalysisUploadCard.jsx
+
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -64,7 +66,7 @@ export default function ImageAnalysisUploadCard({ workspaceId: widProp }) {
       const pre = await iaPresign(wid, {
         filename: file.name,
         content_type: requestedType,
-        title: title || null,          // ← batch Title applied to this file
+        title: title || null,             // ← batch Title applied to this file
         description: description || null, // ← batch Description applied to this file
       });
 
@@ -93,7 +95,7 @@ export default function ImageAnalysisUploadCard({ workspaceId: widProp }) {
         key: pre.key,
         content_type: requestedType,
         size_bytes: file.size,
-        title: title || null,          // ← same batch Title
+        title: title || null,             // ← same batch Title
         description: description || null, // ← same batch Description
       });
 
@@ -102,6 +104,8 @@ export default function ImageAnalysisUploadCard({ workspaceId: widProp }) {
 
       update({ status: "queued", step: "Queued", id: commit.id, analysis_no: commit.analysis_no });
       toast(`Queued #${commit.analysis_no} — ${file.name}`);
+      // 🔔 Tell the table to re-fetch (scoped to this workspace)
+      try { window.dispatchEvent(new CustomEvent("ia:refresh", { detail: { wid } })); } catch {}
       return { ok: true };
     } catch (e) {
       update({ status: "error", step: "Error", error: e?.message || "Upload failed" });
@@ -138,6 +142,8 @@ export default function ImageAnalysisUploadCard({ workspaceId: widProp }) {
       if (failCount === 0) {
         setOpen(false);
         toast(`All ${okCount} uploads queued`);
+        // 🔔 One more nudge at the very end, in case multiple files finished fast
+        try { window.dispatchEvent(new CustomEvent("ia:refresh", { detail: { wid } })); } catch {}
       } else {
         toast("Batch finished with issues", {
           description: `${okCount} succeeded, ${failCount} failed. Check the list for details.`,
@@ -211,7 +217,7 @@ export default function ImageAnalysisUploadCard({ workspaceId: widProp }) {
               {/* File Upload (multiple) */}
               <div className="grid gap-2">
                 <Label>Images</Label>
-                <div className="w-full min-h-40 border border-dashed bg-white/0 dark:bg-black border-neutral-700 rounded-lg">
+                <div className="w-full min-h-40 border border-dashed bg-white/0 dark:bg:black border-neutral-700 rounded-lg">
                   <FileUpload
                     accept="image/png,image/jpeg,image/webp"
                     multiple={true}
