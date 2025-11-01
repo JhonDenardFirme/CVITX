@@ -132,16 +132,36 @@ function VehicleColors({ colors }) {
 }
 
 function RuntimeMetrics({ v }) {
+  // latency: keep ms label
+  const hasLatency =
+    v?.latency_ms != null && !Number.isNaN(Number(v.latency_ms));
+  const latencyText = hasLatency ? `${Number(v.latency_ms)} ms` : "—";
+
+  // gflops: show to 4 decimals + unit label
+  const hasGflops = v?.gflops != null && !Number.isNaN(Number(v.gflops));
+  const gflopsText = hasGflops ? `${Number(v.gflops).toFixed(4)} GFLOPs` : "—";
+
+  // memory: prefer memory_gb (new), fallback to memory_usage (legacy GB)
+  const memGBRaw =
+    v?.memory_gb != null
+      ? v.memory_gb
+      : v?.memory_usage != null
+      ? v.memory_usage
+      : null;
+  const hasMem = memGBRaw != null && !Number.isNaN(Number(memGBRaw));
+  const memMB = hasMem ? Number(memGBRaw) * 1024 : null;
+  const memText = hasMem ? `${memMB.toFixed(0)} MB` : "—";
+
   return (
     <div className="text-xs opacity-80 flex items-center justify-between gap-3">
       <div>
-        <b>Latency:</b> {v?.latency_ms ?? "—"} ms
+        <b>Latency:</b> {latencyText}
       </div>
       <div>
-        <b>GFLOPs:</b> {v?.gflops ?? "—"}
+        <b>GFLOPs:</b> {gflopsText}
       </div>
       <div>
-        <b>Memory:</b> {v?.memory_usage != null ? `${v.memory_usage} GB` : "—"}
+        <b>Memory:</b> {memText}
       </div>
     </div>
   );
@@ -199,7 +219,7 @@ function TypeMakeModelChart({ baseline, cmt }) {
     cmt: { label: "CMT", color: "var(--chart-2)" },
   };
 
-  // NEW: vertically center the chart within a fixed-height area
+  // Vertically center the chart within a fixed-height area
   return (
     <div className="w-full h-80 grid place-items-center">
       <ChartContainer config={chartConfig} className="w-full">
@@ -243,7 +263,6 @@ function TypeMakeModelChart({ baseline, cmt }) {
     </div>
   );
 }
-
 
 function PartsConfidenceChart({ baselineParts, cmtParts }) {
   const names = useMemo(
