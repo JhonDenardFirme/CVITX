@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import NavbarLoggedIn from "@/components/NavbarLoggedIn";
 
 const MAX_SLOTS = 3;
 
@@ -131,8 +132,9 @@ export default function WorkspacesPage() {
   if (err) return <div className="p-8 text-red-500">{err}</div>;
 
   return (
-    <div className="w-full h-screen px-32 py-16 flex flex-col justify-between items-center">
-      <div className="text-center h-auto">
+    <div className="w-full h-screen px-32 pb-16 flex flex-col justify-between items-center bg-center bg-no-repeat bg-fixed" style={{ backgroundImage: "url('/Banner.png')" }}>
+      <NavbarLoggedIn/>
+      <div className="text-center h-auto pb-4">
         <p className="text-6xl font-bold text-white">Workspaces</p>
         <p className="text-sm text-gray-300">
           Create or Choose a Workspace to Work On. Workspaces correspond to individual cases.

@@ -62,8 +62,8 @@ function VehicleColors({ colors }) {
   const list = Array.isArray(colors)
     ? colors
     : colors && typeof colors === "object"
-    ? Object.values(colors)
-    : [];
+      ? Object.values(colors)
+      : [];
 
   if (!list || list.length === 0) {
     return <div className="text-xs text-neutral-500">—</div>;
@@ -146,8 +146,8 @@ function RuntimeMetrics({ v }) {
     v?.memory_gb != null
       ? v.memory_gb
       : v?.memory_usage != null
-      ? v.memory_usage
-      : null;
+        ? v.memory_usage
+        : null;
   const hasMem = memGBRaw != null && !Number.isNaN(Number(memGBRaw));
   const memMB = hasMem ? Number(memGBRaw) * 1024 : null;
   const memText = hasMem ? `${memMB.toFixed(0)} MB` : "—";
@@ -199,6 +199,8 @@ function TmmGrid({ v }) {
   );
 }
 
+// ⬇️ Authorized change: replace TypeMakeModelChart with inner-height control
+// drop-in replacement
 function TypeMakeModelChart({ baseline, cmt }) {
   if (!baseline && !cmt) return null;
 
@@ -209,8 +211,8 @@ function TypeMakeModelChart({ baseline, cmt }) {
   };
 
   const data = [
-    { metric: "Type",  baseline: toPct100(baseline?.type_conf), cmt: toPct100(cmt?.type_conf) },
-    { metric: "Make",  baseline: toPct100(baseline?.make_conf), cmt: toPct100(cmt?.make_conf) },
+    { metric: "Type", baseline: toPct100(baseline?.type_conf), cmt: toPct100(cmt?.type_conf) },
+    { metric: "Make", baseline: toPct100(baseline?.make_conf), cmt: toPct100(cmt?.make_conf) },
     { metric: "Model", baseline: toPct100(baseline?.model_conf), cmt: toPct100(cmt?.model_conf) },
   ];
 
@@ -219,20 +221,14 @@ function TypeMakeModelChart({ baseline, cmt }) {
     cmt: { label: "CMT", color: "var(--chart-2)" },
   };
 
-  // Vertically center the chart within a fixed-height area
+  // ✅ Single source of truth: set height on ChartContainer only
   return (
-    <div className="w-full h-80 grid place-items-center">
-      <ChartContainer config={chartConfig} className="w-full">
+    <div className="w-full h-full flex flex-col justify-center items-center pt-32">
+      <ChartContainer config={chartConfig} className="w-[80%] h-[400px]">
         <BarChart accessibilityLayer data={data}>
           <CartesianGrid vertical={false} />
           <XAxis dataKey="metric" tickLine={false} tickMargin={10} axisLine={false} />
-          <YAxis
-            tickLine={false}
-            axisLine={false}
-            width={28}
-            tickFormatter={(v) => `${v}%`}
-            domain={[0, 100]}
-          />
+          <YAxis tickLine={false} axisLine={false} width={28} tickFormatter={(v) => `${v}%`} domain={[0, 100]} />
           <Tooltip
             cursor={false}
             content={(props) => {
@@ -263,6 +259,7 @@ function TypeMakeModelChart({ baseline, cmt }) {
     </div>
   );
 }
+
 
 function PartsConfidenceChart({ baselineParts, cmtParts }) {
   const names = useMemo(
@@ -400,7 +397,7 @@ export default function ImageAnalysisDetailsDialog({
       const d = await iaShow(workspaceId, analysisId);
       try {
         console.debug("[IA SHOW]", { workspaceId, analysisId, data: d });
-      } catch {}
+      } catch { }
       const normB = normalizeVariant(d?.results?.baseline);
       const normC = normalizeVariant(d?.results?.cmt);
       try {
@@ -415,7 +412,7 @@ export default function ImageAnalysisDetailsDialog({
             parts: normC?.parts || [],
           },
         });
-      } catch {}
+      } catch { }
       setData({ ...d, results: { baseline: normB, cmt: normC } });
     } finally {
       setLoading(false);
