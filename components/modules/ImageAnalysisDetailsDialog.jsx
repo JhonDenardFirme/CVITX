@@ -189,21 +189,9 @@ function TypeMakeModelChart({ baseline, cmt }) {
   };
 
   const data = [
-    {
-      metric: "Type",
-      baseline: toPct100(baseline?.type_conf),
-      cmt: toPct100(cmt?.type_conf),
-    },
-    {
-      metric: "Make",
-      baseline: toPct100(baseline?.make_conf),
-      cmt: toPct100(cmt?.make_conf),
-    },
-    {
-      metric: "Model",
-      baseline: toPct100(baseline?.model_conf),
-      cmt: toPct100(cmt?.model_conf),
-    },
+    { metric: "Type",  baseline: toPct100(baseline?.type_conf), cmt: toPct100(cmt?.type_conf) },
+    { metric: "Make",  baseline: toPct100(baseline?.make_conf), cmt: toPct100(cmt?.make_conf) },
+    { metric: "Model", baseline: toPct100(baseline?.model_conf), cmt: toPct100(cmt?.model_conf) },
   ];
 
   const chartConfig = {
@@ -211,53 +199,51 @@ function TypeMakeModelChart({ baseline, cmt }) {
     cmt: { label: "CMT", color: "var(--chart-2)" },
   };
 
+  // NEW: vertically center the chart within a fixed-height area
   return (
-    <ChartContainer config={chartConfig} className="w-full h-80">
-      <BarChart accessibilityLayer data={data}>
-        <CartesianGrid vertical={false} />
-        <XAxis dataKey="metric" tickLine={false} tickMargin={10} axisLine={false} />
-        <YAxis
-          tickLine={false}
-          axisLine={false}
-          width={28}
-          tickFormatter={(v) => `${v}%`}
-          domain={[0, 100]}
-        />
-        <Tooltip
-          cursor={false}
-          content={(props) => {
-            const d = props?.payload?.[0]?.payload;
-            if (!d) return null;
-            return (
-              <div className="rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs">
-                <div className="mb-1 font-medium">{d.metric}</div>
-                <div className="flex items-center gap-2">
-                  <span
-                    className="inline-block h-2 w-2 rounded-sm"
-                    style={{ background: "var(--color-baseline)" }}
-                  />
-                  <span>Baseline</span>
-                  <span className="ml-auto text-neutral-300">{d.baseline}%</span>
+    <div className="w-full h-80 grid place-items-center">
+      <ChartContainer config={chartConfig} className="w-full">
+        <BarChart accessibilityLayer data={data}>
+          <CartesianGrid vertical={false} />
+          <XAxis dataKey="metric" tickLine={false} tickMargin={10} axisLine={false} />
+          <YAxis
+            tickLine={false}
+            axisLine={false}
+            width={28}
+            tickFormatter={(v) => `${v}%`}
+            domain={[0, 100]}
+          />
+          <Tooltip
+            cursor={false}
+            content={(props) => {
+              const d = props?.payload?.[0]?.payload;
+              if (!d) return null;
+              return (
+                <div className="rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs">
+                  <div className="mb-1 font-medium">{d.metric}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block h-2 w-2 rounded-sm" style={{ background: "var(--color-baseline)" }} />
+                    <span>Baseline</span>
+                    <span className="ml-auto text-neutral-300">{d.baseline}%</span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="inline-block h-2 w-2 rounded-sm" style={{ background: "var(--color-cmt)" }} />
+                    <span>CMT</span>
+                    <span className="ml-auto text-neutral-300">{d.cmt}%</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 mt-1">
-                  <span
-                    className="inline-block h-2 w-2 rounded-sm"
-                    style={{ background: "var(--color-cmt)" }}
-                  />
-                  <span>CMT</span>
-                  <span className="ml-auto text-neutral-300">{d.cmt}%</span>
-                </div>
-              </div>
-            );
-          }}
-          wrapperStyle={{ outline: "none" }}
-        />
-        <Bar dataKey="baseline" name="Baseline" fill="var(--color-baseline)" radius={4} />
-        <Bar dataKey="cmt" name="CMT" fill="var(--color-cmt)" radius={4} />
-      </BarChart>
-    </ChartContainer>
+              );
+            }}
+            wrapperStyle={{ outline: "none" }}
+          />
+          <Bar dataKey="baseline" name="Baseline" fill="var(--color-baseline)" radius={4} />
+          <Bar dataKey="cmt" name="CMT" fill="var(--color-cmt)" radius={4} />
+        </BarChart>
+      </ChartContainer>
+    </div>
   );
 }
+
 
 function PartsConfidenceChart({ baselineParts, cmtParts }) {
   const names = useMemo(

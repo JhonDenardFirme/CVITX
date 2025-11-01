@@ -10,6 +10,7 @@ import {
   ChartBarStacked,
   FileText,
   GalleryVerticalEnd,
+  Aperture,
 } from "lucide-react";
 
 import { NavMain } from "@/components/nav-main";
@@ -114,6 +115,7 @@ export function AppSidebar(props) {
           { title: "Graph Summary", icon: ChartBarStacked, href: safe("/analytics/graphs") },
         ],
       },
+      { title: "Image Analysis", icon: Aperture, href: safe("/image-analysis") },
       { title: "AI Technical Writer", icon: FileText, href: safe("/reports/technical-writer") },
     ];
   }, [base]);
