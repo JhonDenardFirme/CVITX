@@ -1,9 +1,11 @@
+// app/api/workspaces/[workspaceId]/image-analysis/route.js
 import { authHeaders, buildBackendUrl, getWid, passThru } from "../_utils";
 
-export async function GET(_req, ctx) {
+export async function GET(req, ctx) {
   try {
     const wid = await getWid(ctx.params);
-    const url = buildBackendUrl(`/workspaces/${wid}/image-analyses`);
+    const { search } = new URL(req.url); // preserve ?limit=&offset= (and future filters)
+    const url = buildBackendUrl(`/workspaces/${wid}/image-analyses${search || ""}`);
     const h = await authHeaders();
     const r = await fetch(url, { headers: h, cache: "no-store" });
     return passThru(r);

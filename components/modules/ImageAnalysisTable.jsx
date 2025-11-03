@@ -54,12 +54,10 @@ function summarize(d) {
   const b = d?.results?.baseline || null;
   const c = d?.results?.cmt || null;
 
-  // prefer Baseline snapshot if annotated exists, else CMT, else original
-  const snapshot =
-    b?.annotated_image?.url ||
-    c?.annotated_image?.url ||
-    d?.input_image?.url ||
-    null;
+  // Phase-9 canonical → legacy fallback → input
+  const bAnn = b?.assets?.annotated_url || b?.annotated_image?.url || null;
+  const cAnn = c?.assets?.annotated_url || c?.annotated_image?.url || null;
+  const snapshot = bAnn || cAnn || d?.input_image?.url || null;
 
   // choose single-line identity for table from either variant
   const type = b?.type || c?.type || null;
