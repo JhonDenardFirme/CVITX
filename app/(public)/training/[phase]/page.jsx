@@ -327,8 +327,8 @@ export default function TrainingLogsPage() {
             data.metrics.map((m) => (
               <TwoPartAreaChart
                 key={m.key}
-                title={`${m.label} — Baseline → CMT`}
-                description={`${m.desc} • Two-part curve: Baseline (left, blue) steps 01–25; CMT (right, orange) steps 01–25.`}
+                title={`${m.label} | Baseline → CMT`}
+                description={`${m.desc} `}
                 pair={m.pair}
               />
             ))
