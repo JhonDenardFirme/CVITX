@@ -20,10 +20,6 @@ const Navbar = () => {
             Documentation Hub
           </Link>
 
-          <Link className="hover:scale-110 hover:text-[#2dc1d6] transition-all duration-300 ease-out text-sm text-white" href={'/testing-hub'}>
-            Testing Hub
-          </Link>
-
           <Link className="hover:scale-110 hover:text-[#2dc1d6] transition-all duration-300 ease-out text-sm text-white" href={'/auth-signin'}>
             Sign In
           </Link>

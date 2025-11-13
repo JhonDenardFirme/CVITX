@@ -133,7 +133,7 @@ export default function WorkspacesPage() {
 
   return (
     <div className="w-full h-screen px-32 pb-16 flex flex-col justify-between items-center bg-center bg-no-repeat bg-fixed" style={{ backgroundImage: "url('/Banner.png')" }}>
-      <NavbarLoggedIn/>
+      <NavbarLoggedIn />
       <div className="text-center h-auto pb-4">
         <p className="text-6xl font-bold text-white">Workspaces</p>
         <p className="text-sm text-gray-300">
@@ -183,7 +183,7 @@ function WorkspaceCard({ ws, onSave, onDelete }) {
       <Icon className="absolute h-6 w-6 -bottom-3 -right-3 dark:text-white text-black" />
 
       {/* Card CTA: show CTX code from ws.code */}
-      <Link href={`/w/${routeId}/dashboard`} className="w-full h-full">
+      <Link href={`/w/${routeId}/image-analysis`} className="w-full h-full">
         <EvervaultCard text={ws.code || String(ws.id).slice(0, 8).toUpperCase()} />
       </Link>
 
@@ -388,9 +388,9 @@ async function safeError(res) {
   try {
     const j = await res.json();
     if (j?.detail) return typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
-  } catch {}
+  } catch { }
   try {
     return await res.text();
-  } catch {}
+  } catch { }
   return "Request failed";
 }
