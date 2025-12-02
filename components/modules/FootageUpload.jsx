@@ -10,7 +10,7 @@
 
   Aligned API (via Next.js /api proxy):
     GET    /api/workspaces/:wid/videos
-    POST   /api/workspaces/:wid/files/presign                -> { video_id, key, url }
+    POST   /api/workspaces/:wid/files/presign                -> { video_id, key, url }  (requires camera_code, file_size_bytes)
     POST   /api/workspaces/:wid/files/commit?key=...&...     -> creates/updates `videos` row
     PATCH  /api/workspaces/:wid/videos/:vid                  -> edits row
     DELETE /api/workspaces/:wid/videos/:vid                  -> deletes row
@@ -20,7 +20,7 @@
   Canonical flow:
     1) Presign upload for the selected MP4 (content-type must match) → returns { video_id, key (s3_key_raw), url }
     2) PUT the file to S3 using returned presigned URL
-    3) Commit the upload (key + content_type + size_bytes) — backend writes `videos` row
+    3) Commit the upload (key + content_type + size_bytes) — backend writes `videos` row (presign carried camera_code & size)
     4) (Later) Enqueue analysis for a video in 'uploaded' status
 
   Notes:
@@ -288,11 +288,16 @@ export default function FootageUpload() {
 
     setUploading(true)
     try {
-      // 1) presign → MUST return { video_id, key, url }
+      // 1) presign → MUST return { video_id, key, url } (backend requires camera_code + file_size_bytes)
       const presignRes = await fetch(`/api/workspaces/${wid}/files/presign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename: file.name, content_type: file.type || "video/mp4" }),
+        body: JSON.stringify({
+          filename: file.name,
+          content_type: file.type || "video/mp4",
+          file_size_bytes: file.size,
+          camera_code, // already normalized and validated above
+        }),
       })
       if (!presignRes.ok) throw new Error(await presignRes.text())
       const presigned = await presignRes.json()
