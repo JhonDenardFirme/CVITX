@@ -6,28 +6,28 @@
   -----------------
   Purpose:
     Frontend module for uploading CCTV footage to a workspace, listing videos,
-    editing basic metadata while status=uploaded, and enqueueing analysis.
+    editing allowed metadata while status=uploaded, and enqueueing analysis.
 
   Aligned API (via Next.js /api proxy):
     GET    /api/workspaces/:wid/videos
-    POST   /api/workspaces/:wid/files/presign                -> { video_id, key, url }  (requires camera_code, file_size_bytes)
-    POST   /api/workspaces/:wid/files/commit?key=...&...     -> creates/updates `videos` row
-    PATCH  /api/workspaces/:wid/videos/:vid                  -> edits row
-    DELETE /api/workspaces/:wid/videos/:vid                  -> deletes row
-    POST   /api/workspaces/:wid/videos/:vid/enqueue          -> queue analysis
-    GET    /api/workspaces/:wid/videos/:vid/url              -> { url }
+    POST   /api/workspaces/:wid/files/presign                  -> { video_id, key, url }  (requires camera_code, file_size_bytes)
+    POST   /api/workspaces/:wid/videos/commit                  -> JSON body; creates/updates `videos` row
+    PATCH  /api/workspaces/:wid/videos/:vid                    -> edits row (accepts cameraLabel, recordedAt only)
+    DELETE /api/workspaces/:wid/videos/:vid                    -> deletes row
+    POST   /api/workspaces/:wid/videos/:vid/enqueue            -> queue analysis
+    GET    /api/workspaces/:wid/videos/:vid/url                -> { url, ttl }
 
   Canonical flow:
     1) Presign upload for the selected MP4 (content-type must match) → returns { video_id, key (s3_key_raw), url }
     2) PUT the file to S3 using returned presigned URL
-    3) Commit the upload (key + content_type + size_bytes) — backend writes `videos` row (presign carried camera_code & size)
+    3) Commit the upload with a JSON body (see handleSubmit) — backend writes/updates `videos` row
     4) (Later) Enqueue analysis for a video in 'uploaded' status
 
   Notes:
-    - recorded_at is sent as ISO-8601 (UTC) derived from <input type="datetime-local">
+    - recordedAt is sent as ISO-8601 (UTC) derived from <input type="datetime-local">
     - Preview uses a short-lived signed GET URL fetched per card (auto-retries once on error)
     - Editing is only allowed while status === "uploaded"
-    - FE prevails on camera_code and enforces "CAM-..." pattern
+    - Camera Code is set at creation (presign + commit) and is immutable afterwards (display-only in the card)
 */
 
 import React, { useEffect, useMemo, useState } from "react"
@@ -54,7 +54,7 @@ import { useAppStore } from "@/lib/store"
 
 /* ---------------- helpers ---------------- */
 
-// FE-owned camera code rules:
+// FE-owned camera code rules (for creation only):
 // - Must start with "CAM-"
 // - Uppercase
 // - Allowed chars after prefix: A–Z, 0–9, and hyphen
@@ -64,7 +64,6 @@ function normalizeCameraCode(raw) {
   if (!raw) return ""
   let s = String(raw).toUpperCase().trim().replace(/\s+/g, "-")
   if (!s.startsWith("CAM-")) s = "CAM-" + s.replace(/^CAM-+/i, "")
-  // keep only A-Z 0-9 and hyphen after normalization
   s = s.replace(/[^A-Z0-9-]/g, "")
   if (s.length > CAMCODE_MAX) s = s.slice(0, CAMCODE_MAX)
   return s
@@ -73,8 +72,7 @@ function isValidCameraCode(code) {
   if (!code) return false
   if (!code.startsWith("CAM-")) return false
   if (code.length > CAMCODE_MAX) return false
-  // Require at least one char after CAM-
-  if (code.length < 5) return false
+  if (code.length < 5) return false // require at least one char after CAM-
   return /^[A-Z0-9-]+$/.test(code)
 }
 
@@ -180,9 +178,9 @@ export default function FootageUpload() {
   const [files, setFiles] = useState([])
   const [uploading, setUploading] = useState(false)
   const [form, setForm] = useState({
-    fileName: "",          // -> file_name
-    cameraLabel: "",       // -> camera_label
-    cameraCode: "CAM-001", // -> camera_code (FE-owned; CAM-... enforced)
+    fileName: "",          // -> file_name (used at commit only for initial set)
+    cameraLabel: "",       // -> camera_label (also PATCH-able)
+    cameraCode: "CAM-001", // -> camera_code (enforced at creation; immutable post-commit)
     recordedAtLocal: "",   // datetime-local (to ISO)
   })
   const [camErr, setCamErr] = useState("")
@@ -202,14 +200,16 @@ export default function FootageUpload() {
         } else {
           console.log(`count: ${arr.length}`)
           if (arr.length) {
-            console.table(arr.map(v => ({
-              id: v.id,
-              file_name: v.file_name,
-              camera_code: v.camera_code,
-              camera_label: v.camera_label,
-              status: v.status,
-              recorded_at: v.recorded_at,
-            })))
+            console.table(
+              arr.map((v) => ({
+                id: v.id,
+                file_name: v.file_name,
+                camera_code: v.camera_code,
+                camera_label: v.camera_label,
+                status: v.status,
+                recorded_at: v.recorded_at,
+              }))
+            )
           }
         }
         console.groupEnd()
@@ -222,7 +222,9 @@ export default function FootageUpload() {
       }
     }
     load()
-    return () => { ignore = true }
+    return () => {
+      ignore = true
+    }
   }, [wid])
 
   const resetForm = () => {
@@ -244,9 +246,11 @@ export default function FootageUpload() {
   // Poll while any queued/processing
   useEffect(() => {
     if (!wid) return
-    const anyPending = videos.some(v => v.status === "queued" || v.status === "processing")
+    const anyPending = videos.some((v) => v.status === "queued" || v.status === "processing")
     if (!anyPending) return
-    const t = setInterval(() => { refresh().catch(() => {}) }, 12000)
+    const t = setInterval(() => {
+      refresh().catch(() => {})
+    }, 12000)
     return () => clearInterval(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wid, videos])
@@ -270,8 +274,6 @@ export default function FootageUpload() {
       return
     }
 
-    // These are still collected on the FE form for user clarity and later PATCH,
-    // but initial row is created by backend on /files/commit.
     const file_name = form.fileName?.trim() || file.name
     const recorded_at = localDateTimeToISO(form.recordedAtLocal)
     const camera_label = form.cameraLabel?.trim() || null
@@ -296,7 +298,7 @@ export default function FootageUpload() {
           filename: file.name,
           content_type: file.type || "video/mp4",
           file_size_bytes: file.size,
-          camera_code, // already normalized and validated above
+          camera_code, // normalized above
         }),
       })
       if (!presignRes.ok) throw new Error(await presignRes.text())
@@ -312,16 +314,27 @@ export default function FootageUpload() {
       // 2) upload
       await putToS3(putUrl, file)
 
-      // 3) commit (backend validates + writes/updates `videos` row)
-      const qs = new URLSearchParams({
-        key,
-        content_type: file.type || "video/mp4",
-        size_bytes: String(file.size),
+      // 3) commit — BACKEND REQUIRES JSON BODY (no query params)
+      const commitBody = {
+        videoId: video_id,
+        s3KeyRaw: key,
+        fileName: file_name,
+        frameStride: 3,
+        recordedAt: recorded_at,
+        cameraCode: camera_code,
+        cameraLabel: camera_label,
+        workspaceCode: currentWorkspace?.code || null,
+        fileSizeBytes: file.size,
+        contentType: file.type || "video/mp4",
+      }
+      const commitRes = await fetch(`/api/workspaces/${wid}/videos/commit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(commitBody),
       })
-      const commitRes = await fetch(`/api/workspaces/${wid}/files/commit?${qs}`, { method: "POST" })
       if (!commitRes.ok) throw new Error(await commitRes.text())
 
-      // 4) backend already created/updated the row on /files/commit → just refresh list
+      // 4) backend wrote/updated the row on /videos/commit → refresh list
       await refresh()
 
       setOpen(false)
@@ -393,7 +406,7 @@ export default function FootageUpload() {
                   />
                 </div>
 
-                {/* camera_code */}
+                {/* camera_code (creation-time only; enforced here) */}
                 <div className="grid gap-2">
                   <Label htmlFor="f-code">Camera Code</Label>
                   <Input
@@ -406,7 +419,9 @@ export default function FootageUpload() {
                       setCamErr(isValidCameraCode(norm) ? "" : "Must start with 'CAM-' and use A–Z, 0–9, or '-'")
                     }}
                   />
-                  {camErr ? <p className="text-xs text-red-400">{camErr}</p> : (
+                  {camErr ? (
+                    <p className="text-xs text-red-400">{camErr}</p>
+                  ) : (
                     <p className="text-xs text-neutral-500">
                       FE-enforced. Must start with <span className="font-mono">CAM-</span>.
                     </p>
@@ -422,9 +437,7 @@ export default function FootageUpload() {
                     value={form.recordedAtLocal}
                     onChange={(e) => setForm((s) => ({ ...s, recordedAtLocal: e.target.value }))}
                   />
-                  <p className="text-xs text-neutral-500">
-                    Please input the actual time the video was recorded.
-                  </p>
+                  <p className="text-xs text-neutral-500">Please input the actual time the video was recorded.</p>
                 </div>
               </div>
 
@@ -449,13 +462,11 @@ export default function FootageUpload() {
                       }
                       setFiles([first])
                       // Prefill fileName from chosen file if empty
-                      setForm((s) => s.fileName ? s : { ...s, fileName: first.name })
+                      setForm((s) => (s.fileName ? s : { ...s, fileName: first.name }))
                     }}
                   />
                 </div>
-                <p className="text-xs text-neutral-400">
-                  Only one MP4 file is allowed. Drag & drop is supported.
-                </p>
+                <p className="text-xs text-neutral-400">Only one MP4 file is allowed. Drag & drop is supported.</p>
               </div>
 
               <DialogFooter>
@@ -487,9 +498,7 @@ export default function FootageUpload() {
       {/* Video grid (sorted by camera_code) */}
       <div className="h-auto w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {sortedVideos.length === 0 && (
-          <div className="w-full text-xs text-neutral-400 mb-4">
-            No videos found for this workspace.
-          </div>
+          <div className="w-full text-xs text-neutral-400 mb-4">No videos found for this workspace.</div>
         )}
 
         {sortedVideos.map((v) => (
@@ -497,12 +506,8 @@ export default function FootageUpload() {
             key={v.id}
             wid={wid}
             v={v}
-            onChange={(updated) =>
-              setVideos((list) => list.map(x => (x.id === updated.id ? updated : x)))
-            }
-            onRemove={(vid) =>
-              setVideos((list) => list.filter(x => x.id !== vid))
-            }
+            onChange={(updated) => setVideos((list) => list.map((x) => (x.id === updated.id ? updated : x)))}
+            onRemove={(vid) => setVideos((list) => list.filter((x) => x.id !== vid))}
             refreshAll={refresh}
           />
         ))}
@@ -527,17 +532,17 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
   // editable fields (only allowed in 'uploaded')
   const [fileName, setFileName] = useState(v.file_name || "")
   const [cameraLabel, setCameraLabel] = useState(v.camera_label || "")
-  const [cameraCode, setCameraCode] = useState(v.camera_code || "CAM-001")
-  const [cameraCodeErr, setCameraCodeErr] = useState("")
+  // cameraCode is immutable post-commit; display-only
+  const [cameraCode] = useState(v.camera_code || "CAM-001")
   const [recordedAtLocal, setRecordedAtLocal] = useState(isoToLocalInput(v.recorded_at))
 
   useEffect(() => {
     // keep dialog fields in sync if v changes externally
     setFileName(v.file_name || "")
     setCameraLabel(v.camera_label || "")
-    setCameraCode(v.camera_code || "CAM-001")
+    // cameraCode is intentionally NOT reassignable by user (immutable)
     setRecordedAtLocal(isoToLocalInput(v.recorded_at))
-  }, [v.id, v.file_name, v.camera_label, v.camera_code, v.recorded_at])
+  }, [v.id, v.file_name, v.camera_label, v.recorded_at])
 
   async function loadPreview() {
     if (!wid || !v?.id) return
@@ -602,19 +607,12 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
       toast.error("Only videos in 'uploaded' state can be edited.")
       return
     }
-    const normCode = normalizeCameraCode(cameraCode)
-    if (!isValidCameraCode(normCode)) {
-      setCameraCodeErr("Camera code must start with 'CAM-' and contain A–Z, 0–9, or '-' only.")
-      toast.error("Invalid camera code")
-      return
-    }
     try {
       setSaving(true)
+      // Backend PATCH accepts only cameraLabel and recordedAt (camelCase)
       const payload = {
-        file_name: fileName.trim() || null,
-        camera_label: cameraLabel.trim() || null,
-        camera_code: normCode,
-        recorded_at: localDateTimeToISO(recordedAtLocal) || null,
+        cameraLabel: (cameraLabel || "").trim() || null,
+        recordedAt: localDateTimeToISO(recordedAtLocal) || null,
       }
       console.log("[videos:patch] →", { wid, vid: v.id, payload })
       const updated = await patchVideo(wid, v.id, payload)
@@ -666,7 +664,8 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
             <DialogHeader>
               <DialogTitle>Edit Video Details</DialogTitle>
               <DialogDescription>
-                You can edit the file name, camera label, camera code, and recorded time while status is <span className="font-mono">uploaded</span>.
+                You can edit the file name, camera label, and recorded time while status is{" "}
+                <span className="font-mono">uploaded</span>. Camera Code is immutable post-commit.
               </DialogDescription>
             </DialogHeader>
 
@@ -692,25 +691,11 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
                 />
               </div>
 
+              {/* Camera Code (display-only) */}
               <div className="grid gap-2">
-                <Label htmlFor={`cc-${v.id}`}>Camera Code</Label>
-                <Input
-                  id={`cc-${v.id}`}
-                  value={cameraCode}
-                  onChange={(e) => {
-                    const norm = normalizeCameraCode(e.target.value)
-                    setCameraCode(norm)
-                    setCameraCodeErr(isValidCameraCode(norm) ? "" : "Must start with 'CAM-' and use A–Z, 0–9, or '-'")
-                  }}
-                  disabled={!canEdit}
-                />
-                {cameraCodeErr ? (
-                  <p className="text-xs text-red-400">{cameraCodeErr}</p>
-                ) : (
-                  <p className="text-xs text-neutral-500">
-                    FE-enforced. Must start with <span className="font-mono">CAM-</span>.
-                  </p>
-                )}
+                <Label>Camera Code</Label>
+                <Input value={cameraCode} disabled />
+                <p className="text-xs text-neutral-500">Immutable. Set during upload/commit.</p>
               </div>
 
               <div className="grid gap-2">
@@ -727,7 +712,9 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
 
             <DialogFooter className="justify-between gap-2 sm:justify-end">
               <DialogClose asChild>
-                <Button variant="outline" disabled={saving || deleting}>Close</Button>
+                <Button variant="outline" disabled={saving || deleting}>
+                  Close
+                </Button>
               </DialogClose>
               <Button onClick={doSave} disabled={!canEdit || saving || deleting}>
                 {saving ? "Saving…" : "Save changes"}
@@ -798,7 +785,9 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
             v.status === "done" && "border-emerald-500/60 text-emerald-400",
             v.status === "error" && "border-red-500/60 text-red-400",
             !["queued", "processing", "done", "error"].includes(v.status) && "border-neutral-700 text-neutral-400",
-          ].filter(Boolean).join(" ")}
+          ]
+            .filter(Boolean)
+            .join(" ")}
           title={`Status: ${String(v.status || "-")}`}
         >
           {String(v.status || "-")}
@@ -828,12 +817,8 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
 
         {/* row 2: camera_label | recorded_at */}
         <div className="flex flex-row w-full justify-between items-center gap-3">
-          <p className="text-xs text-white/30 truncate max-w-[45%]">
-            {v.camera_label || "—"}
-          </p>
-          <p className="text-xs text-white/30 truncate max-w-[45%] text-right">
-            {fmtHuman(v.recorded_at)}
-          </p>
+          <p className="text-xs text-white/30 truncate max-w-[45%]">{v.camera_label || "—"}</p>
+          <p className="text-xs text-white/30 truncate max-w-[45%] text-right">{fmtHuman(v.recorded_at)}</p>
         </div>
       </div>
     </div>
