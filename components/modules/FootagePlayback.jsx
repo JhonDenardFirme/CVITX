@@ -1,6 +1,42 @@
+// components/FootagePlayback.jsx
 "use client"
 
-import { useRef, useState, useEffect, useMemo } from "react"
+/*
+  FootagePlayback.jsx
+  -------------------
+  Purpose:
+    Workspace-scoped video player that coordinates playback selection with the
+    global store. Supports an "All (no playback)" option that suppresses playback
+    and instructs downstream panels to aggregate results across all videos.
+    When a specific video is selected, fetches a short-lived signed URL and plays it.
+
+  Store contract used:
+    - playbackMode: 'all' | 'video'
+    - playbackSelectedVideoId: string | null
+    - setPlaybackAll(), setPlaybackVideo(id)
+    - playerSeekRequest, requestPlayerSeek(req), clearPlayerSeekRequest()
+    - videoCatalog[wid][videoId] meta registry
+    - publishVideos(wid, videos), updateVideoMeta(wid, videoId, partial), getVideoMeta(wid, videoId)
+
+  API routes (via Next.js /api proxy):
+    GET /api/workspaces/:wid/videos             -> array of videos
+    GET /api/workspaces/:wid/videos/:vid/url    -> { url } short-lived signed GET URL
+
+  Behaviors:
+    - Dropdown includes "All (no playback)" + real videos from catalog
+    - Selecting "All" sets playbackMode='all' and clears the player
+    - Selecting a video sets playbackMode='video', resolves signed URL, and plays
+    - Handles URL expiry by retrying once
+    - Consumes one-shot seek requests from store (if req.videoId matches current)
+    - Publishes duration and video dimensions back to store
+    - Prev/Next navigates the real catalog ordering (camera-code aware)
+
+  Notes:
+    - If no catalog for the workspace yet, the component loads the list itself
+      and publishes it to the store.
+*/
+
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useParams } from "next/navigation"
 import { useAppStore } from "@/lib/store"
 
@@ -12,25 +48,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
-const AUTO = "__AUTO__" // sentinel for "All videos (Auto)"
-
-const formatTime = (seconds) => {
-  const s = Math.max(0, Math.floor(seconds || 0))
-  const hrs = Math.floor(s / 3600)
-  const mins = Math.floor((s % 3600) / 60)
-  const secs = s % 60
-  return [hrs, mins, secs].map((v) => String(v).padStart(2, "0")).join(":")
-}
-
-/* ---------- shared helpers (align with FootageUpload) ---------- */
-
-function useIsMounted() {
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => { setMounted(true) }, [])
-  return mounted
-}
-
-
+/* ---------------- helpers ---------------- */
 
 function cameraCodeKey(code) {
   if (!code) return [Number.POSITIVE_INFINITY, ""]
@@ -44,316 +62,321 @@ function sortByCameraCodeAsc(a, b) {
   if (an !== bn) return an - bn
   return as.localeCompare(bs)
 }
-function fmtHuman(dt) {
-  if (!dt) return "—"
-  const d = typeof dt === "string" ? new Date(dt) : dt
-  const dPart = new Intl.DateTimeFormat(undefined, { month: "short", day: "2-digit", year: "numeric" }).format(d)
-  const tPart = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(d)
-  return `${dPart} | ${tPart}`
+
+function formatTime(seconds) {
+  const s = Number.isFinite(seconds) ? Math.max(0, seconds) : 0
+  const hrs = Math.floor(s / 3600)
+  const mins = Math.floor((s % 3600) / 60)
+  const secs = Math.floor(s % 60)
+  return [hrs, mins, secs].map((v) => String(v).padStart(2, "0")).join(":")
 }
 
-/* ---------- API helpers (same /api proxy layer) ---------- */
-async function listVideos(wid) {
+// Thin API helpers
+async function listWorkspaceVideos(wid) {
   const r = await fetch(`/api/workspaces/${wid}/videos`, { cache: "no-store" })
-  if (!r.ok) throw new Error(await r.text())
+  if (!r.ok) throw new Error(await r.text().catch(() => `Failed to list videos (${r.status})`))
   return r.json()
 }
-async function getPreviewUrl(wid, vid) {
+async function getVideoPreviewUrl(wid, vid) {
   const r = await fetch(`/api/workspaces/${wid}/videos/${vid}/url`, { cache: "no-store" })
-  if (!r.ok) {
-    const txt = await r.text().catch(() => "")
-    throw new Error(`preview-url ${r.status}: ${txt || "failed"}`)
-  }
+  if (!r.ok) throw new Error(await r.text().catch(() => `Failed to get video URL (${r.status})`))
   const j = await r.json()
   return j?.url || j?.signed_url || j?.href || null
 }
 
+/* ---------------- component ---------------- */
+
 export default function FootagePlayback() {
-
-  const isMounted = useIsMounted();
-
-  /* ---------- resolve workspace ---------- */
+  // Workspace resolution
   const params = useParams()
   const widFromParams = params?.workspaceId
   const currentWorkspace = useAppStore((s) => s.currentWorkspace)
   const wid = currentWorkspace?.id || widFromParams || null
 
-  /* ---------- publish selection to store ---------- */
+  // Store wiring
+  const playbackMode = useAppStore((s) => s.playbackMode)
+  const playbackSelectedVideoId = useAppStore((s) => s.playbackSelectedVideoId)
   const setPlaybackAll = useAppStore((s) => s.setPlaybackAll)
   const setPlaybackVideo = useAppStore((s) => s.setPlaybackVideo)
 
-  /* ---------- NEW: publish video catalog ---------- */
-  const setCatalog = useAppStore((s) => s.publishVideos)
-
-  /* ---------- consume player seek requests ---------- */
   const playerSeekRequest = useAppStore((s) => s.playerSeekRequest)
   const clearPlayerSeekRequest = useAppStore((s) => s.clearPlayerSeekRequest)
 
-  /* ---------- list + selection state ---------- */
-  const [videos, setVideos] = useState([])
-  const sortedVideos = useMemo(() => [...videos].sort(sortByCameraCodeAsc), [videos])
+  const videoCatalog = useAppStore((s) => s.videoCatalog)
+  const publishVideos = useAppStore((s) => s.publishVideos)
+  const updateVideoMeta = useAppStore((s) => s.updateVideoMeta)
+  const getVideoMeta = useAppStore((s) => s.getVideoMeta)
 
-  const [selectedVideoId, setSelectedVideoId] = useState(null)
-  const selectedIndex = useMemo(
-    () => sortedVideos.findIndex((v) => v.id === selectedVideoId),
-    [sortedVideos, selectedVideoId]
-  )
-  const selectedVideo = selectedIndex >= 0 ? sortedVideos[selectedIndex] : null
+  // Derived catalog for this workspace
+  const catalogForWid = videoCatalog?.[wid || "default"] || {}
 
-  /* ---------- playback states ---------- */
+  const videoList = useMemo(() => {
+    const arr = Object.values(catalogForWid)
+    // stable sort: by camera_code asc, fallback file_name asc
+    return arr.sort((a, b) => {
+      const cc = sortByCameraCodeAsc(a, b)
+      if (cc !== 0) return cc
+      const af = (a?.file_name || "").localeCompare(b?.file_name || "")
+      if (af !== 0) return af
+      return (a?.id || "").localeCompare(b?.id || "")
+    })
+  }, [catalogForWid])
+
+  const selectedMeta = useMemo(() => {
+    if (!wid || playbackMode !== "video" || !playbackSelectedVideoId) return null
+    return getVideoMeta(wid, playbackSelectedVideoId)
+  }, [wid, playbackMode, playbackSelectedVideoId, getVideoMeta])
+
+  // Player refs/state
   const videoRef = useRef(null)
+  const [previewUrl, setPreviewUrl] = useState(null)
+  const [urlError, setUrlError] = useState(null)
+  const [urlRetries, setUrlRetries] = useState(0)
+  const [resumeAt, setResumeAt] = useState(null)
+
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [isEditingTime, setIsEditingTime] = useState(false)
   const [inputTime, setInputTime] = useState("00:00:00")
-  const [resolution, setResolution] = useState({ w: null, h: null })
+  const [dims, setDims] = useState({ w: null, h: null })
 
-  /* ---------- preview URL (signed GET) ---------- */
-  const [previewUrl, setPreviewUrl] = useState(null)
-  const [loadingPreview, setLoadingPreview] = useState(false)
-  const [previewTries, setPreviewTries] = useState(0) // one retry on 403/expired
-  const previewCacheRef = useRef({}) // { [videoId]: url }
-
-  /* ---------- load list on wid change ---------- */
+  // Ensure catalog exists (self-load if empty)
   useEffect(() => {
-    let ignore = false
-    async function load() {
+    let cancel = false
+    async function ensureCatalog() {
       if (!wid) return
+      const hasAny = Object.keys(catalogForWid || {}).length > 0
+      if (hasAny) return
       try {
-        const arr = await listVideos(wid)
-        if (ignore) return
-        if (process.env.NODE_ENV !== "production") {
-          console.groupCollapsed(`[player:list] wid=${wid}`)
-          if (!Array.isArray(arr)) console.warn("Response was not an array:", arr)
-          else {
-            console.log(`count: ${arr.length}`)
-            console.table(arr.map(v => ({
-              id: v.id,
-              file_name: v.file_name,
-              camera_code: v.camera_code,
-              camera_label: v.camera_label,
-              status: v.status,
-              recorded_at: v.recorded_at,
-            })))
-          }
-          console.groupEnd()
+        const arr = await listWorkspaceVideos(wid)
+        if (!cancel && Array.isArray(arr)) {
+          publishVideos(wid, arr)
         }
-
-        // NEW: publish id + recorded_at into the store catalog
-        // NEW: publish rich meta for Timeline labeling, not just id + recorded_at
-        setCatalog(
-          wid,
-          (Array.isArray(arr) ? arr : []).map((v) => ({
-            id: v.id,
-            recorded_at: v.recorded_at,
-            camera_code: v.camera_code,
-            camera_label: v.camera_label,
-            file_name: v.file_name,
-            title: v.title || v.file_name,
-          }))
-        )
-
-        
-
-        setVideos(Array.isArray(arr) ? arr : [])
-        // default selection: first in sorted list (NOT Auto)
-        setSelectedVideoId((prev) => {
-          if (prev === AUTO) return prev
-          if (prev && arr.some(x => x.id === prev)) return prev
-          const first = Array.isArray(arr) && arr.length > 0 ? [...arr].sort(sortByCameraCodeAsc)[0] : null
-          return first?.id || null
-        })
       } catch (e) {
-        console.error("[player:list] failed:", e)
-        setVideos([])
-        setSelectedVideoId(null)
+        // Swallow; player can still render "All" mode gracefully
+        console.warn("[playback] list videos failed:", e?.message || e)
       }
     }
-    load()
-    return () => { ignore = true }
-  }, [wid, setCatalog])
+    ensureCatalog()
+    return () => { cancel = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wid])
 
-  /* ---------- sync selection to global store ---------- */
+  // Load/refresh signed URL when a specific video is selected
   useEffect(() => {
-    if (selectedVideoId === AUTO) {
-      setPlaybackAll()
-    } else if (selectedVideoId) {
-      setPlaybackVideo(selectedVideoId)
-    }
-  }, [selectedVideoId, setPlaybackAll, setPlaybackVideo])
+    let cancel = false
 
-  /* ---------- fetch preview on selection (skip when Auto) ---------- */
-  useEffect(() => {
-    async function run() {
-      setPreviewUrl(null)
-      setResolution({ w: null, h: null })
-      setDuration(0)
-      setCurrentTime(0)
-      setIsPlaying(false)
-      setPreviewTries(0)
-
-      if (!wid || !selectedVideoId || selectedVideoId === AUTO) return
-
-      // cached?
-      const cached = previewCacheRef.current[selectedVideoId]
-      if (cached) {
-        setPreviewUrl(cached)
+    async function resolveUrl() {
+      // Clear state when in 'all' mode or no selection
+      if (!wid || playbackMode !== "video" || !playbackSelectedVideoId) {
+        setPreviewUrl(null)
+        setUrlError(null)
+        setUrlRetries(0)
         return
       }
-
       try {
-        setLoadingPreview(true)
-        const url = await getPreviewUrl(wid, selectedVideoId)
+        const url = await getVideoPreviewUrl(wid, playbackSelectedVideoId)
+        if (cancel) return
         if (!url) {
-          console.warn("[player:url] missing url for", selectedVideoId)
           setPreviewUrl(null)
+          setUrlError("No signed URL returned")
           return
         }
-        previewCacheRef.current[selectedVideoId] = url
         setPreviewUrl(url)
-        if (process.env.NODE_ENV !== "production") {
-          console.log("[player:url] ready for", selectedVideoId)
-        }
+        setUrlError(null)
+        setUrlRetries(0)
       } catch (e) {
-        console.warn("[player:url] failed:", e?.message || e)
+        if (cancel) return
         setPreviewUrl(null)
-      } finally {
-        setLoadingPreview(false)
+        setUrlError(e?.message || "Failed to fetch signed URL")
       }
     }
-    run()
-  }, [wid, selectedVideoId])
 
-  /* ---------- track time + duration from element ---------- */
-  useEffect(() => {
-    const v = videoRef.current
-    if (!v) return
-    const onTime = () => setCurrentTime(v.currentTime || 0)
-    const onMeta = () => {
-      setDuration(v.duration || 0)
-      setResolution({ w: v.videoWidth || null, h: v.videoHeight || null })
-    }
-    v.addEventListener("timeupdate", onTime)
-    v.addEventListener("loadedmetadata", onMeta)
-    // initialize immediately in case events already fired
-    onMeta()
-    onTime()
-    return () => {
-      v.removeEventListener("timeupdate", onTime)
-      v.removeEventListener("loadedmetadata", onMeta)
-    }
-  }, [previewUrl]) // new source → re-bind
+    resolveUrl()
+    return () => { cancel = true }
+  }, [wid, playbackMode, playbackSelectedVideoId])
 
-  /* ---------- respond to player seek requests ---------- */
+  // Consume one-shot external seek requests
   useEffect(() => {
     const req = playerSeekRequest
-    if (!req) return
-
-    // if not on the right video, switch selection first
-    if (selectedVideoId !== req.videoId) {
-      setSelectedVideoId(req.videoId)
-      setPlaybackVideo(req.videoId)
-      // Defer actual seek until metadata is loaded. We'll try again when previewUrl updates.
-      return
-    }
+    if (!req || playbackMode !== "video") return
+    const { videoId, ms, autoplay } = req
+    if (!videoId || !Number.isFinite(ms)) return
+    if (videoId !== playbackSelectedVideoId) return
 
     const v = videoRef.current
-    if (v && !Number.isNaN(req.ms)) {
-      const doSeek = () => {
-        v.currentTime = Math.max(0, req.ms / 1000)
-        if (req.autoplay) v.play().catch(() => {})
-        clearPlayerSeekRequest()
-        v.removeEventListener("loadedmetadata", doSeek)
-        v.removeEventListener("canplay", doSeek)
-      }
-
-      // If metadata available, seek now; otherwise wait for events.
-      if (v.readyState >= 1) doSeek()
-      else {
-        v.addEventListener("loadedmetadata", doSeek)
-        v.addEventListener("canplay", doSeek)
+    if (v) {
+      const t = Math.max(0, ms / 1000)
+      v.currentTime = t
+      setCurrentTime(t)
+      if (autoplay) {
+        v.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false))
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playerSeekRequest, selectedVideoId, previewUrl])
+    clearPlayerSeekRequest()
+  }, [playerSeekRequest, playbackMode, playbackSelectedVideoId, clearPlayerSeekRequest])
 
-  /* ---------- controls ---------- */
-  const handlePlay = () => { videoRef.current?.play(); setIsPlaying(true) }
-  const handlePause = () => { videoRef.current?.pause(); setIsPlaying(false) }
+  // Handlers
+  const handlePlay = () => {
+    const v = videoRef.current
+    if (!v) return
+    v.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false))
+  }
+
+  const handlePause = () => {
+    const v = videoRef.current
+    if (!v) return
+    v.pause()
+    setIsPlaying(false)
+  }
 
   const handlePrevFrame = () => {
-    const v = videoRef.current; if (!v) return
-    v.pause(); setIsPlaying(false)
-    v.currentTime = Math.max((v.currentTime || 0) - 1 / 24, 0)
+    const v = videoRef.current
+    if (!v) return
+    v.pause()
+    const step = 1 / 24
+    v.currentTime = Math.max(v.currentTime - step, 0)
+    setCurrentTime(v.currentTime)
+    setIsPlaying(false)
   }
+
   const handleNextFrame = () => {
-    const v = videoRef.current; if (!v) return
-    v.pause(); setIsPlaying(false)
-    v.currentTime = (v.currentTime || 0) + 1 / 24
+    const v = videoRef.current
+    if (!v) return
+    v.pause()
+    const step = 1 / 24
+    v.currentTime = Math.min(v.currentTime + step, duration || v.duration || v.currentTime + step)
+    setCurrentTime(v.currentTime)
+    setIsPlaying(false)
   }
 
   const handlePrevVideo = () => {
-    if (selectedIndex <= 0) return
-    setSelectedVideoId(sortedVideos[selectedIndex - 1].id)
-    setIsPlaying(false)
-  }
-  const handleNextVideo = () => {
-    if (selectedIndex < 0 || selectedIndex >= sortedVideos.length - 1) return
-    setSelectedVideoId(sortedVideos[selectedIndex + 1].id)
-    setIsPlaying(false)
+    if (videoList.length === 0) return
+    if (playbackMode !== "video" || !playbackSelectedVideoId) {
+      // If currently in 'all', jump to first video
+      setPlaybackVideo(videoList[0]?.id)
+      return
+    }
+    const idx = videoList.findIndex((x) => x.id === playbackSelectedVideoId)
+    const prevIdx = Math.max(idx - 1, 0)
+    setPlaybackVideo(videoList[prevIdx]?.id)
   }
 
-  const handleTimeInput = () => {
-    const [hh, mm, ss] = (inputTime || "00:00:00").split(":").map(Number)
-    const newTime = (hh * 3600) + (mm * 60) + (ss || 0)
-    if (!Number.isNaN(newTime) && videoRef.current) {
-      videoRef.current.currentTime = Math.min(Math.max(newTime, 0), duration || newTime)
-      setCurrentTime(videoRef.current.currentTime)
+  const handleNextVideo = () => {
+    if (videoList.length === 0) return
+    if (playbackMode !== "video" || !playbackSelectedVideoId) {
+      // If currently in 'all', jump to first video
+      setPlaybackVideo(videoList[0]?.id)
+      return
+    }
+    const idx = videoList.findIndex((x) => x.id === playbackSelectedVideoId)
+    const nextIdx = Math.min(idx + 1, videoList.length - 1)
+    setPlaybackVideo(videoList[nextIdx]?.id)
+  }
+
+  const handleTimeInputCommit = () => {
+    const parts = String(inputTime || "").split(":").map((n) => Number(n))
+    if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n) || n < 0)) {
+      setIsEditingTime(false)
+      return
+    }
+    const newTime = parts[0] * 3600 + parts[1] * 60 + parts[2]
+    const v = videoRef.current
+    if (v && Number.isFinite(newTime)) {
+      v.currentTime = Math.min(Math.max(0, newTime), duration || v.duration || newTime)
+      setCurrentTime(v.currentTime)
     }
     setIsEditingTime(false)
   }
 
-  /* ---------- render ---------- */
-  const hasVideos = sortedVideos.length > 0
-  const isAuto = selectedVideoId === AUTO
-  const displayRes = (resolution.w && resolution.h) ? `${resolution.w} × ${resolution.h}` : "—"
+  const handleVideoError = async () => {
+    if (!wid || playbackMode !== "video" || !playbackSelectedVideoId) return
+    if (urlRetries >= 1) {
+      setUrlError("Playback error: signed URL may have expired.")
+      return
+    }
+    try {
+      const v = videoRef.current
+      if (v) setResumeAt(v.currentTime || 0)
+      const url = await getVideoPreviewUrl(wid, playbackSelectedVideoId)
+      setPreviewUrl(url || null)
+      setUrlRetries((n) => n + 1)
+      setUrlError(null)
+    } catch (e) {
+      setUrlError(e?.message || "Failed to refresh signed URL")
+      setUrlRetries((n) => n + 1)
+    }
+  }
 
-  // Compose label: "CAMx | Camera Label"
-  const selectedLabel = isAuto
-    ? "Auto"
-    : [
-        selectedVideo?.camera_code || "",
-        selectedVideo?.camera_label || selectedVideo?.file_name || "",
-      ].filter(Boolean).join(" | ") || (selectedVideo?.file_name || "—")
+  // On fresh metadata, update dimension + duration + resume if applicable
+  const handleLoadedMetadata = (e) => {
+    const v = e.currentTarget
+    const d = Number.isFinite(v.duration) ? v.duration : 0
+    setDuration(d)
+    setDims({ w: v.videoWidth || null, h: v.videoHeight || null })
+
+    if (wid && playbackMode === "video" && playbackSelectedVideoId) {
+      updateVideoMeta(wid, playbackSelectedVideoId, {
+        durationSec: d,
+        width: v.videoWidth || null,
+        height: v.videoHeight || null,
+      })
+    }
+
+    if (resumeAt !== null && Number.isFinite(resumeAt)) {
+      v.currentTime = Math.max(0, Math.min(resumeAt, d || resumeAt))
+      setCurrentTime(v.currentTime)
+      setResumeAt(null)
+    }
+  }
+
+  // Keep currentTime synced to state
+  const handleTimeUpdate = (e) => {
+    setCurrentTime(e.currentTarget.currentTime || 0)
+  }
+
+  // Dropdown label builders
+  const allLabel = "All (no playback)"
+  const selectedLabelCenter = (() => {
+    if (playbackMode !== "video" || !selectedMeta) return allLabel
+    return selectedMeta?.file_name || selectedMeta?.title || selectedMeta?.id || allLabel
+  })()
+  const dimsLabel = (() => {
+    if (dims?.w && dims?.h) return `${dims.w} × ${dims.h}`
+    return "—"
+  })()
 
   return (
     <div className="w-full h-full flex flex-col p-8 items-center">
-      {/* Top bar */}
+      {/* Header strip */}
       <div className="h-12 w-full rounded-md border border-neutral-700 mb-4 px-4 flex items-center justify-between">
+        {/* Left: selector */}
         <div className="w-64 h-8 px-4 gap-4 flex flex-row items-center justify-start">
           <img src="/icons/video.svg" alt="Video" className="w-4 h-4" />
-
           <Select
-            value={selectedVideoId || ""}
-            onValueChange={(val) => setSelectedVideoId(val)}
-            disabled={!hasVideos}
+            value={playbackMode === "all" ? "all" : (playbackSelectedVideoId || "all")}
+            onValueChange={(val) => {
+              if (val === "all") {
+                setPlaybackAll()
+              } else {
+                setPlaybackVideo(val)
+              }
+            }}
           >
-            <SelectTrigger className="min-w-48 h-8 text-xs px-1 py-2">
-              <SelectValue placeholder={hasVideos ? "Select video…" : "No videos"} />
+            <SelectTrigger className="w-48 h-8 text-xs px-1 py-2">
+              <SelectValue placeholder={allLabel} />
             </SelectTrigger>
             <SelectContent>
-              {/* Auto is first */}
-              <SelectItem value={AUTO} className="text-xs">
-                Auto
+              <SelectItem value="all" className="text-xs">
+                {allLabel}
               </SelectItem>
-              {sortedVideos.map((v) => {
-                const labelLeft = v?.camera_code || ""
-                const labelRight = v?.camera_label || v?.file_name || v?.id?.slice(0, 8) || ""
-                const composed = [labelLeft, labelRight].filter(Boolean).join(" | ")
+              {videoList.map((v) => {
+                const left = v?.camera_code ? `${v.camera_code}` : "CAM-—"
+                const right = v?.file_name || v?.title || v?.id
                 return (
                   <SelectItem key={v.id} value={v.id} className="text-xs">
-                    {composed || (v.file_name || v.camera_label || v.id.slice(0, 8))}
+                    {left} | {right}
                   </SelectItem>
                 )
               })}
@@ -361,138 +384,143 @@ export default function FootagePlayback() {
           </Select>
         </div>
 
+        {/* Center: filename/title */}
         <div className="w-64 h-8 px-4 flex flex-row items-center justify-center">
-          <p
-            className="text-xs text-white truncate"
-            // Make the title deterministic during SSR (no locale formatting)
-            title={isAuto ? "All videos (Auto)" : selectedLabel}
-            suppressHydrationWarning
-          >
-            {selectedLabel}
-            {!isAuto && selectedVideo?.recorded_at ? (
-              <span suppressHydrationWarning>
-                {isMounted ? ` • ${fmtHuman(selectedVideo.recorded_at)}` : ""}
-              </span>
-            ) : null}
-          </p>
+          <p className="text-xs text-white truncate">{selectedLabelCenter}</p>
         </div>
 
-
+        {/* Right: dynamic resolution */}
         <div className="w-64 h-8 px-4 gap-2 flex flex-row items-center justify-end">
           <img src="/icons/hd.svg" alt="Resolution" className="w-4 h-4" />
-          <p className="text-xs text-muted-foreground">{displayRes}</p>
+          <p className="text-xs text-muted-foreground">{dimsLabel}</p>
         </div>
       </div>
 
-      {/* Player */}
+      {/* Player area */}
       <div className="h-[80%] w-auto rounded-xl overflow-hidden bg-black flex items-center justify-center">
-        {!hasVideos ? (
-          <div className="text-xs text-neutral-400">No videos in this workspace.</div>
-        ) : isAuto ? (
-          <div className="text-xs text-neutral-400">No playback (All workspace)</div>
+        {playbackMode === "all" ? (
+          <div className="h-full w-full flex items-center justify-center">
+            <span className="text-[12px] text-neutral-400">
+              All Mode — No playback. Results below aggregate across all videos.
+            </span>
+          </div>
         ) : previewUrl ? (
           <video
             ref={videoRef}
-            key={previewUrl} // force reload when URL changes
+            key={`${playbackSelectedVideoId}:${previewUrl}`}
             src={previewUrl}
             className="h-full w-auto object-contain rounded-xl"
             controls={false}
-            preload="metadata"
-            playsInline
-            onLoadedMetadata={(e) => {
-              const dur = e.currentTarget.duration || 0
-              setDuration(dur)
-              setResolution({ w: e.currentTarget.videoWidth || null, h: e.currentTarget.videoHeight || null })
-              // NEW: publish duration so jumps can clamp within range
-              if (wid && selectedVideoId) {
-                useAppStore.getState().updateVideoMeta(wid, selectedVideoId, { durationSec: dur })
-              }
-            }}
-            onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime || 0)}
-            onError={() => {
-              // attempt one refresh if URL expired
-              if (previewTries < 1 && wid && selectedVideoId) {
-                setPreviewTries((n) => n + 1)
-                // bust cache and refetch
-                delete previewCacheRef.current[selectedVideoId]
-                getPreviewUrl(wid, selectedVideoId)
-                  .then((url) => {
-                    if (url) {
-                      previewCacheRef.current[selectedVideoId] = url
-                      setPreviewUrl(url)
-                    }
-                  })
-                  .catch(() => {})
-              }
-            }}
+            onLoadedMetadata={handleLoadedMetadata}
+            onTimeUpdate={handleTimeUpdate}
+            onError={handleVideoError}
           />
+        ) : urlError ? (
+          <div className="h-full w-full flex items-center justify-center">
+            <span className="text-[12px] text-red-400">
+              {urlError}
+            </span>
+          </div>
         ) : (
-          <div className="text-xs text-neutral-400">{loadingPreview ? "Loading preview…" : "No preview available."}</div>
+          <div className="h-full w-full flex items-center justify-center">
+            <span className="text-[12px] text-neutral-400">Loading video…</span>
+          </div>
         )}
       </div>
 
-      {/* Transport */}
+      {/* Transport & timeline */}
       <div className="w-full mt-4 flex items-center gap-4 px-4">
         {isEditingTime ? (
           <input
             type="text"
             value={inputTime}
             onChange={(e) => setInputTime(e.target.value)}
-            onBlur={handleTimeInput}
-            onKeyDown={(e) => e.key === "Enter" && handleTimeInput()}
+            onBlur={handleTimeInputCommit}
+            onKeyDown={(e) => e.key === "Enter" && handleTimeInputCommit()}
             className="bg-neutral-800 text-white rounded px-2 py-0.5 w-[72px] text-sm text-center"
           />
         ) : (
           <span
             onClick={() => {
+              if (playbackMode === "all") return
               setInputTime(formatTime(currentTime))
               setIsEditingTime(true)
             }}
-            className="text-sm text-orange-500 cursor-pointer tabular-nums w-[72px] text-center"
+            className={`text-sm ${playbackMode === "all" ? "text-neutral-600 cursor-not-allowed" : "text-orange-500 cursor-pointer"} tabular-nums w-[72px] text-center`}
           >
-            {formatTime(currentTime)}
+            {formatTime(playbackMode === "all" ? 0 : currentTime)}
           </span>
         )}
 
         <input
           type="range"
           min={0}
-          max={duration || 0}
-          value={Math.min(currentTime, duration || 0)}
+          max={playbackMode === "all" ? 0 : (duration || 0)}
+          value={playbackMode === "all" ? 0 : currentTime}
           onChange={(e) => {
+            if (playbackMode === "all") return
             const newTime = parseFloat(e.target.value)
             setCurrentTime(newTime)
-            if (videoRef.current) videoRef.current.currentTime = newTime
+            const v = videoRef.current
+            if (v) v.currentTime = newTime
           }}
-          disabled={!previewUrl}
           className="flex-1 accent-orange-500 h-1 rounded-lg appearance-none bg-neutral-700"
+          disabled={playbackMode === "all"}
         />
 
         <span className="text-sm text-white tabular-nums w-[72px] text-center">
-          {formatTime(duration)}
+          {formatTime(playbackMode === "all" ? 0 : duration)}
         </span>
       </div>
 
       <div className="w-full h-[10%] mt-4 flex items-center justify-center gap-4 bg-neutral-900 rounded-sm px-6">
-        <button onClick={handlePrevVideo} disabled={!hasVideos || selectedIndex <= 0} className="p-3 rounded-full bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40">
+        <button
+          onClick={handlePrevVideo}
+          className={`p-3 rounded-full ${videoList.length ? "bg-neutral-800 hover:bg-neutral-700" : "bg-neutral-800/50 cursor-not-allowed"}`}
+          disabled={!videoList.length}
+        >
           <img src="/icons/prev.svg" alt="Previous Video" className="w-5 h-5" />
         </button>
-        <button onClick={handlePrevFrame} disabled={!previewUrl} className="p-3 rounded-full bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40">
+
+        <button
+          onClick={handlePrevFrame}
+          className={`p-3 rounded-full ${playbackMode === "video" ? "bg-neutral-800 hover:bg-neutral-700" : "bg-neutral-800/50 cursor-not-allowed"}`}
+          disabled={playbackMode !== "video"}
+        >
           <img src="/icons/prevframe.svg" alt="Previous Frame" className="w-5 h-5" />
         </button>
+
         {isPlaying ? (
-          <button onClick={handlePause} disabled={!previewUrl} className="p-3 rounded-full bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40">
+          <button
+            onClick={handlePause}
+            className={`p-3 rounded-full ${playbackMode === "video" ? "bg-neutral-800 hover:bg-neutral-700" : "bg-neutral-800/50 cursor-not-allowed"}`}
+            disabled={playbackMode !== "video"}
+          >
             <img src="/icons/pause.svg" alt="Pause" className="w-5 h-5" />
           </button>
         ) : (
-          <button onClick={handlePlay} disabled={!previewUrl} className="p-3 rounded-full bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40">
+          <button
+            onClick={handlePlay}
+            className={`p-3 rounded-full ${playbackMode === "video" ? "bg-neutral-800 hover:bg-neutral-700" : "bg-neutral-800/50 cursor-not-allowed"}`}
+            disabled={playbackMode !== "video"}
+          >
             <img src="/icons/play.svg" alt="Play" className="w-5 h-5" />
           </button>
         )}
-        <button onClick={handleNextFrame} disabled={!previewUrl} className="p-3 rounded-full bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40">
+
+        <button
+          onClick={handleNextFrame}
+          className={`p-3 rounded-full ${playbackMode === "video" ? "bg-neutral-800 hover:bg-neutral-700" : "bg-neutral-800/50 cursor-not-allowed"}`}
+          disabled={playbackMode !== "video"}
+        >
           <img src="/icons/nextframe.svg" alt="Next Frame" className="w-5 h-5" />
         </button>
-        <button onClick={handleNextVideo} disabled={!hasVideos || selectedIndex === sortedVideos.length - 1} className="p-3 rounded-full bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40">
+
+        <button
+          onClick={handleNextVideo}
+          className={`p-3 rounded-full ${videoList.length ? "bg-neutral-800 hover:bg-neutral-700" : "bg-neutral-800/50 cursor-not-allowed"}`}
+          disabled={!videoList.length}
+        >
           <img src="/icons/next.svg" alt="Next Video" className="w-5 h-5" />
         </button>
       </div>

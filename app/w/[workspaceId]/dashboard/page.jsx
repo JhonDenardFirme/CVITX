@@ -1,6 +1,26 @@
+// app/w/[workspaceId]/dashboard/page.jsx
 'use client'
 
+/*
+  Dashboard Playback Page
+  -----------------------
+  Purpose:
+    Hub page composing the Playback player (left), a summary counter (right),
+    and a bottom panel that switches among analytics and utilities.
+
+  Alignment changes in this rewrite:
+    - Header enrichment is now *param-aware*:
+      If the store's currentWorkspace is empty on first mount, we fall back to
+      the route param (workspaceId) and try to resolve details from `workspaces`.
+    - All other behaviors remain source-of-truth in their respective modules:
+      • FootagePlayback: owns playbackMode ('all' | 'video') and signed URLs.
+      • DetectionCounter / IndexingRecords / etc.: read playback scope from the store.
+
+  No props are passed to child modules by design—modules discover data via the store.
+*/
+
 import { useMemo } from 'react'
+import { useParams } from 'next/navigation'
 import { useAppStore } from '@/lib/store'
 
 // Modules
@@ -11,7 +31,9 @@ import IndexingRecords from '@/components/modules/IndexingRecords'
 import TechnicalWriter from '@/components/modules/TechnicalWriter'
 import DetectionSummary from '@/components/modules/DetectionSummary'
 import GraphSummary from '@/components/modules/GraphSummary'
+import DetectionCounter from '@/components/modules/DetectionCounter'
 
+// UI
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -21,32 +43,45 @@ import {
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
 import { Separator } from '@/components/ui/separator'
-import { SidebarTrigger } from '@/components/ui/sidebar' // <- ONLY the trigger; no Provider/Inset here
-import DetectionCounter from '@/components/modules/DetectionCounter'
+import { SidebarTrigger } from '@/components/ui/sidebar' // Only the trigger; no Provider/Inset here
 
 export default function Page() {
+  // Panel & record selection (unchanged)
   const activePanel = useAppStore((s) => s.activePanel)
   const setActivePanel = useAppStore((s) => s.setActivePanel)
   const selectedRecordId = useAppStore((s) => s.selectedRecordId)
   const setSelectedRecordId = useAppStore((s) => s.setSelectedRecordId)
 
-  // --- Match Footage Upload breadcrumb enrichment ---
-  const current = useAppStore(s => s.currentWorkspace)
-  const all = useAppStore(s => s.workspaces)
+  // Workspace context from store
+  const current = useAppStore((s) => s.currentWorkspace)
+  const all = useAppStore((s) => s.workspaces)
 
+  // Route params fallback for header enrichment
+  const params = useParams()
+  const widFromParams = params?.workspaceId
+
+  // Enriched header data with param-aware fallback
   const enriched = useMemo(() => {
-    if (!current?.id) return { code: '-', title: '-', description: '-' }
-    const match = Array.isArray(all) ? all.find(w => w.id === current.id) : null
-    return {
-      code: (current.code || match?.code || '-') || '-',
-      title: (current.title || match?.title || '-') || '-',
-      description: (current.description || match?.description || '-') || '-',
-    }
-  }, [current, all])
+    // Prefer store.currentWorkspace if it has an id
+    const primaryId = current?.id || null
+
+    // If store is empty on first mount, try to resolve via route param
+    const resolvedId = primaryId || (typeof widFromParams === 'string' ? widFromParams : null)
+
+    // Try to find a matching workspace in the cached list
+    const match = resolvedId && Array.isArray(all) ? all.find(w => w.id === resolvedId) : null
+
+    // Compose final fields with a strict fallback to '-'
+    const code = (current?.code || match?.code || '-') || '-'
+    const title = (current?.title || match?.title || '-') || '-'
+    const description = (current?.description || match?.description || '-') || '-'
+
+    return { code, title, description }
+  }, [current, all, widFromParams])
 
   return (
     <>
-      {/* Header (same structure/styles as Footage Upload) */}
+      {/* Header (mirrors Footage Upload structure/styles) */}
       <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
         <div className="flex items-center gap-2 px-4">
           <SidebarTrigger className="-ml-1" />
@@ -60,7 +95,6 @@ export default function Page() {
               </BreadcrumbItem>
               <BreadcrumbSeparator className="hidden md:block" />
               <BreadcrumbItem>
-                {/* Keep this static like Footage Uploads; rename if you prefer a different label */}
                 <BreadcrumbPage>Playback</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
@@ -68,18 +102,18 @@ export default function Page() {
         </div>
       </header>
 
-      {/* Main Content */}
+      {/* Main content */}
       <div className="flex flex-col gap-4 justify-center items-center p-8">
         <div className="flex flex-row justify-center items-center w-full gap-4">
           <div className="flex-[6] h-[75vh] rounded-xl bg-neutral-900">
             <FootagePlayback />
           </div>
           <div className="flex-[4] h-[75vh] rounded-xl bg-neutral-900">
-            <DetectionCounter/>
+            <DetectionCounter />
           </div>
         </div>
 
-        {/* Bottom Panel */}
+        {/* Bottom panel */}
         <div className="w-full rounded-xl bg-neutral-900 h-auto">
           {activePanel === 'Footage Upload' && <FootageUpload />}
 

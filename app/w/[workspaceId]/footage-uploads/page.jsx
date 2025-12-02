@@ -1,10 +1,12 @@
+// app/w/[workspaceId]/footage-uploads/page.jsx
 "use client"
 
-import { useMemo } from 'react'
-import { useAppStore } from '@/lib/store'
+import { useMemo } from "react"
+import { useParams } from "next/navigation"
+import { useAppStore } from "@/lib/store"
 
 // Modules
-import FootageUpload from '@/components/modules/FootageUpload'
+import FootageUpload from "@/components/modules/FootageUpload"
 
 import {
   Breadcrumb,
@@ -13,24 +15,29 @@ import {
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb'
-import { Separator } from '@/components/ui/separator'
-import { SidebarTrigger } from '@/components/ui/sidebar'
-import { EvervaultCard, Icon } from '@/components/ui/evervault-card'
+} from "@/components/ui/breadcrumb"
+import { Separator } from "@/components/ui/separator"
+import { SidebarTrigger } from "@/components/ui/sidebar"
+import { EvervaultCard, Icon } from "@/components/ui/evervault-card"
 
 export default function Page() {
-  const current = useAppStore(s => s.currentWorkspace)
-  const all = useAppStore(s => s.workspaces)
+  const params = useParams()
+  const widFromParams = params?.workspaceId
+
+  const current = useAppStore((s) => s.currentWorkspace)
+  const all = useAppStore((s) => s.workspaces)
 
   const enriched = useMemo(() => {
-    if (!current?.id) return { code: "-", title: "-", description: "-" }
-    const match = Array.isArray(all) ? all.find(w => w.id === current.id) : null
+    const targetId = current?.id || widFromParams
+    if (!targetId) return { code: "-", title: "-", description: "-" }
+
+    const match = Array.isArray(all) ? all.find((w) => w.id === targetId) : null
     return {
-      code: (current.code || match?.code || "-") || "-",
-      title: (current.title || match?.title || "-") || "-",
-      description: (current.description || match?.description || "-") || "-",
+      code: (current?.code || match?.code || "-") || "-",
+      title: (current?.title || match?.title || "-") || "-",
+      description: (current?.description || match?.description || "-") || "-",
     }
-  }, [current, all])
+  }, [current, all, widFromParams])
 
   return (
     <>

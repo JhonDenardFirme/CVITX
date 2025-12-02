@@ -183,7 +183,7 @@ function WorkspaceCard({ ws, onSave, onDelete }) {
       <Icon className="absolute h-6 w-6 -bottom-3 -right-3 dark:text-white text-black" />
 
       {/* Card CTA: show CTX code from ws.code */}
-      <Link href={`/w/${routeId}/image-analysis`} className="w-full h-full">
+      <Link href={`/w/${routeId}/dashboard`} className="w-full h-full">
         <EvervaultCard text={ws.code || String(ws.id).slice(0, 8).toUpperCase()} />
       </Link>
 

@@ -17,8 +17,6 @@ export default function Home() {
 
   return (
     <div className="w-full h-auto bg-neutral-950 flex flex-col justify-center items-center">
-
-
     <Banner></Banner>
     <Stats></Stats>
     <Intro></Intro>

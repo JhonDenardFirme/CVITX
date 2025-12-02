@@ -1,9 +1,38 @@
+// components/modules/FootageUpload.jsx
 "use client"
 
-import React, { useState, useEffect, useMemo } from "react"
-import { HardDriveUpload, UploadIcon, Film, EllipsisVertical } from "lucide-react"
-import { toast } from "sonner" 
+/*
+  FootageUpload.jsx
+  -----------------
+  Purpose:
+    Frontend module for uploading CCTV footage to a workspace, listing videos,
+    editing basic metadata while status=uploaded, and enqueueing analysis.
 
+  Aligned API (via Next.js /api proxy):
+    GET    /api/workspaces/:wid/videos
+    POST   /api/workspaces/:wid/files/presign                -> { video_id, key, url }
+    POST   /api/workspaces/:wid/files/commit?key=...&...     -> creates/updates `videos` row
+    PATCH  /api/workspaces/:wid/videos/:vid                  -> edits row
+    DELETE /api/workspaces/:wid/videos/:vid                  -> deletes row
+    POST   /api/workspaces/:wid/videos/:vid/enqueue          -> queue analysis
+    GET    /api/workspaces/:wid/videos/:vid/url              -> { url }
+
+  Canonical flow:
+    1) Presign upload for the selected MP4 (content-type must match) → returns { video_id, key (s3_key_raw), url }
+    2) PUT the file to S3 using returned presigned URL
+    3) Commit the upload (key + content_type + size_bytes) — backend writes `videos` row
+    4) (Later) Enqueue analysis for a video in 'uploaded' status
+
+  Notes:
+    - recorded_at is sent as ISO-8601 (UTC) derived from <input type="datetime-local">
+    - Preview uses a short-lived signed GET URL fetched per card (auto-retries once on error)
+    - Editing is only allowed while status === "uploaded"
+    - FE prevails on camera_code and enforces "CAM-..." pattern
+*/
+
+import React, { useEffect, useMemo, useState } from "react"
+import { HardDriveUpload, UploadIcon, Film, EllipsisVertical } from "lucide-react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -18,23 +47,38 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-
-
 import { FileUpload } from "@/components/ui/file-upload"
-
 
 import { useParams } from "next/navigation"
 import { useAppStore } from "@/lib/store"
 
 /* ---------------- helpers ---------------- */
 
-function useIsMounted() {
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => { setMounted(true) }, [])
-  return mounted
+// FE-owned camera code rules:
+// - Must start with "CAM-"
+// - Uppercase
+// - Allowed chars after prefix: A–Z, 0–9, and hyphen
+// - Length <= 32
+const CAMCODE_MAX = 32
+function normalizeCameraCode(raw) {
+  if (!raw) return ""
+  let s = String(raw).toUpperCase().trim().replace(/\s+/g, "-")
+  if (!s.startsWith("CAM-")) s = "CAM-" + s.replace(/^CAM-+/i, "")
+  // keep only A-Z 0-9 and hyphen after normalization
+  s = s.replace(/[^A-Z0-9-]/g, "")
+  if (s.length > CAMCODE_MAX) s = s.slice(0, CAMCODE_MAX)
+  return s
+}
+function isValidCameraCode(code) {
+  if (!code) return false
+  if (!code.startsWith("CAM-")) return false
+  if (code.length > CAMCODE_MAX) return false
+  // Require at least one char after CAM-
+  if (code.length < 5) return false
+  return /^[A-Z0-9-]+$/.test(code)
 }
 
-// Numeric-aware sort for codes like "CAM1", "CAM10", "CAM2"
+// Numeric-aware sort for codes like "CAM-1", "CAM-10", "CAM-2"
 function cameraCodeKey(code) {
   if (!code) return [Number.POSITIVE_INFINITY, ""]
   const c = String(code)
@@ -48,7 +92,7 @@ function sortByCameraCodeAsc(a, b) {
   return as.localeCompare(bs)
 }
 
-// Convert <input type="datetime-local"> value to ISO-8601 (UTC) string
+// Convert <input type="datetime-local"> to ISO string (UTC)
 function localDateTimeToISO(localValue) {
   if (!localValue) return null
   const d = new Date(localValue)
@@ -71,33 +115,10 @@ function fmtHuman(dt) {
   return `${dPart} | ${tPart}`
 }
 
-// Demo gallery (fallback only)
-const dummyVideos = Array.from({ length: 7 }, (_, i) => {
-  const n = (i % 3) + 1
-  return {
-    id: `demo-${i}`,
-    src: `/footage/footage${n}.mp4`,
-    file_name: `footage${n}.mp4`,
-    camera_label: "Demo location",
-    camera_code: `CAM${i + 1}`,
-    status: "uploaded",
-    recorded_at: new Date().toISOString(),
-  }
-})
-
 /* ---------------- API helpers (proxying via /api) ---------------- */
 
 async function listVideos(wid) {
   const r = await fetch(`/api/workspaces/${wid}/videos`, { cache: "no-store" })
-  if (!r.ok) throw new Error(await r.text())
-  return r.json()
-}
-async function createVideo(wid, body) {
-  const r = await fetch(`/api/workspaces/${wid}/videos`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  })
   if (!r.ok) throw new Error(await r.text())
   return r.json()
 }
@@ -120,7 +141,7 @@ async function enqueueVideo(wid, vid) {
   return r.json()
 }
 
-// S3 browser PUT helper (must match the presigned Content-Type)
+// PUT the file to S3 using presigned URL (must match content-type used for presign)
 async function putToS3(putUrl, file) {
   const res = await fetch(putUrl, {
     method: "PUT",
@@ -130,7 +151,7 @@ async function putToS3(putUrl, file) {
   if (!res.ok) throw new Error("S3 upload failed")
 }
 
-// Fetch a short-lived preview URL for a video
+// Get short-lived preview URL for video playback
 async function getPreviewUrl(wid, vid) {
   const r = await fetch(`/api/workspaces/${wid}/videos/${vid}/url`, { cache: "no-store" })
   if (!r.ok) {
@@ -138,10 +159,10 @@ async function getPreviewUrl(wid, vid) {
     throw new Error(`preview-url ${r.status}: ${txt || "failed"}`)
   }
   const j = await r.json()
-  // Backend returns { url, content_type, expires_in }
-  // Be tolerant of naming differences:
   return j?.url || j?.signed_url || j?.href || null
 }
+
+/* ---------------- Main component ---------------- */
 
 export default function FootageUpload() {
   // Resolve workspace id (store first, then /w/[workspaceId] param)
@@ -159,12 +180,14 @@ export default function FootageUpload() {
   const [files, setFiles] = useState([])
   const [uploading, setUploading] = useState(false)
   const [form, setForm] = useState({
-    fileName: "",          // maps to file_name
-    cameraLabel: "",       // maps to camera_label
-    recordedAtLocal: "",   // datetime-local (will be converted to ISO)
+    fileName: "",          // -> file_name
+    cameraLabel: "",       // -> camera_label
+    cameraCode: "CAM-001", // -> camera_code (FE-owned; CAM-... enforced)
+    recordedAtLocal: "",   // datetime-local (to ISO)
   })
+  const [camErr, setCamErr] = useState("")
 
-  // Load videos (with explicit logs; no dummy fallback)
+  // Load videos
   useEffect(() => {
     let ignore = false
     async function load() {
@@ -172,31 +195,30 @@ export default function FootageUpload() {
       try {
         const arr = await listVideos(wid)
         if (ignore) return
+
         console.groupCollapsed(`[videos:list] wid=${wid}`)
         if (!Array.isArray(arr)) {
-          console.warn("Response was not an array:", arr)
-        } else if (arr.length === 0) {
-          console.info("No videos yet (empty array).")
+          console.warn("Response not array:", arr)
         } else {
           console.log(`count: ${arr.length}`)
-          console.table(arr.map(v => ({
-            id: v.id,
-            file_name: v.file_name,
-            camera_code: v.camera_code,
-            camera_label: v.camera_label,
-            status: v.status,
-            recorded_at: v.recorded_at,
-          })))
+          if (arr.length) {
+            console.table(arr.map(v => ({
+              id: v.id,
+              file_name: v.file_name,
+              camera_code: v.camera_code,
+              camera_label: v.camera_label,
+              status: v.status,
+              recorded_at: v.recorded_at,
+            })))
+          }
         }
         console.groupEnd()
 
-        if (process.env.NODE_ENV !== "production") {
-          console.log("[videos:list] ok (via /api proxy).")
-        }
         setVideos(Array.isArray(arr) ? arr : [])
       } catch (e) {
         console.error("[videos:list] failed:", e)
-        if (!ignore) setVideos([])
+        setVideos([])
+        toast.error("Failed to load videos")
       }
     }
     load()
@@ -205,61 +227,87 @@ export default function FootageUpload() {
 
   const resetForm = () => {
     setFiles([])
-    setForm({ fileName: "", cameraLabel: "", recordedAtLocal: "" })
+    setForm({ fileName: "", cameraLabel: "", cameraCode: "CAM-001", recordedAtLocal: "" })
+    setCamErr("")
   }
 
   async function refresh() {
+    if (!wid) return
     try {
       const arr = await listVideos(wid)
       setVideos(Array.isArray(arr) ? arr : [])
-    } catch { }
+    } catch (e) {
+      console.warn("[videos:refresh] failed:", e)
+    }
   }
 
-  // While any video is queued/processing, poll the list every 12s
+  // Poll while any queued/processing
   useEffect(() => {
     if (!wid) return
     const anyPending = videos.some(v => v.status === "queued" || v.status === "processing")
     if (!anyPending) return
-    const t = setInterval(() => {
-      refresh().catch(() => { })
-    }, 12000)
+    const t = setInterval(() => { refresh().catch(() => {}) }, 12000)
     return () => clearInterval(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wid, videos])
 
-  // Create flow: presign → PUT → commit → POST video
+  // Create flow: presign → PUT → commit → refresh (backend writes videos row on commit)
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!wid) return alert("Workspace is not set. Please reload the workspace page.")
-    if (files.length !== 1) return alert("Please attach exactly one MP4 file.")
+    if (!wid) {
+      toast.error("Workspace not set. Reload the workspace page.")
+      return
+    }
+    if (files.length !== 1) {
+      toast.error("Attach exactly one .mp4 file.")
+      return
+    }
 
     const file = files[0]
     const isMp4 = file?.type === "video/mp4" || file?.name?.toLowerCase().endsWith(".mp4")
-    if (!isMp4) return alert("Only .mp4 files are allowed.")
+    if (!isMp4) {
+      toast.error("Only .mp4 files are allowed.")
+      return
+    }
 
+    // These are still collected on the FE form for user clarity and later PATCH,
+    // but initial row is created by backend on /files/commit.
     const file_name = form.fileName?.trim() || file.name
     const recorded_at = localDateTimeToISO(form.recordedAtLocal)
     const camera_label = form.cameraLabel?.trim() || null
-    if (!recorded_at) return alert("Please set the 'Recorded at' date/time.")
+    const camera_code = normalizeCameraCode(form.cameraCode)
+    if (!recorded_at) {
+      toast.error("Please set the 'Recorded at' date/time.")
+      return
+    }
+    if (!isValidCameraCode(camera_code)) {
+      setCamErr("Camera code must start with 'CAM-' and contain A–Z, 0–9, or '-' only.")
+      toast.error("Invalid camera code")
+      return
+    }
 
     setUploading(true)
     try {
-      // 1) presign
+      // 1) presign → MUST return { video_id, key, url }
       const presignRes = await fetch(`/api/workspaces/${wid}/files/presign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ filename: file.name, content_type: file.type || "video/mp4" }),
       })
       if (!presignRes.ok) throw new Error(await presignRes.text())
-      const { key, url: putUrl } = await presignRes.json()
-      if (process.env.NODE_ENV !== "production") {
-        console.log("[videos:create] presigned", { key })
+      const presigned = await presignRes.json()
+      const video_id = presigned?.video_id
+      const key = presigned?.key
+      const putUrl = presigned?.url
+      if (!video_id || !key || !putUrl) {
+        throw new Error("Presign missing required fields { video_id, key, url }")
       }
+      console.log("[videos:create] presigned", { video_id, key })
 
-      // 2) PUT to S3
+      // 2) upload
       await putToS3(putUrl, file)
 
-      // 3) commit
+      // 3) commit (backend validates + writes/updates `videos` row)
       const qs = new URLSearchParams({
         key,
         content_type: file.type || "video/mp4",
@@ -268,22 +316,15 @@ export default function FootageUpload() {
       const commitRes = await fetch(`/api/workspaces/${wid}/files/commit?${qs}`, { method: "POST" })
       if (!commitRes.ok) throw new Error(await commitRes.text())
 
-      // 4) create row
-      const payload = { file_name, camera_label, recorded_at, s3_key_raw: key, frame_stride: 3 }
-      if (process.env.NODE_ENV !== "production") {
-        console.log("[videos:create] payload", payload)
-      }
-      const created = await createVideo(wid, payload)
-
-      setVideos((prev) => [...prev, created])
+      // 4) backend already created/updated the row on /files/commit → just refresh list
       await refresh()
 
       setOpen(false)
       resetForm()
-      alert("Upload successful.")
+      toast.success("Upload successful")
     } catch (err) {
       console.error(err)
-      alert(`Upload failed: ${err?.message || err}`)
+      toast.error(`Upload failed: ${err?.message || err}`)
     } finally {
       setUploading(false)
     }
@@ -347,8 +388,28 @@ export default function FootageUpload() {
                   />
                 </div>
 
+                {/* camera_code */}
+                <div className="grid gap-2">
+                  <Label htmlFor="f-code">Camera Code</Label>
+                  <Input
+                    id="f-code"
+                    placeholder="CAM-001"
+                    value={form.cameraCode}
+                    onChange={(e) => {
+                      const norm = normalizeCameraCode(e.target.value)
+                      setForm((s) => ({ ...s, cameraCode: norm }))
+                      setCamErr(isValidCameraCode(norm) ? "" : "Must start with 'CAM-' and use A–Z, 0–9, or '-'")
+                    }}
+                  />
+                  {camErr ? <p className="text-xs text-red-400">{camErr}</p> : (
+                    <p className="text-xs text-neutral-500">
+                      FE-enforced. Must start with <span className="font-mono">CAM-</span>.
+                    </p>
+                  )}
+                </div>
+
                 {/* recorded_at */}
-                <div className="grid gap-2 md:col-span-2">
+                <div className="grid gap-2">
                   <Label htmlFor="f-recorded">Recorded At</Label>
                   <Input
                     id="f-recorded"
@@ -375,10 +436,10 @@ export default function FootageUpload() {
                       const first = arr[0]
                       if (!first) return setFiles([])
 
-                      const isMp4 = first.type === "video/mp4" || first.name?.toLowerCase().endsWith(".mp4")
-                      if (!isMp4) {
+                      const isMp4_ = first.type === "video/mp4" || first.name?.toLowerCase().endsWith(".mp4")
+                      if (!isMp4_) {
                         setFiles([])
-                        alert("Only .mp4 files are allowed.")
+                        toast.error("Only .mp4 files are allowed.")
                         return
                       }
                       setFiles([first])
@@ -398,7 +459,16 @@ export default function FootageUpload() {
                     Cancel
                   </Button>
                 </DialogClose>
-                <Button type="submit" disabled={!wid || !files.length || !form.recordedAtLocal || uploading}>
+                <Button
+                  type="submit"
+                  disabled={
+                    !wid ||
+                    !files.length ||
+                    !form.recordedAtLocal ||
+                    !isValidCameraCode(normalizeCameraCode(form.cameraCode)) ||
+                    uploading
+                  }
+                >
                   {uploading ? "Uploading..." : "Save & Upload"}
                 </Button>
               </DialogFooter>
@@ -410,15 +480,13 @@ export default function FootageUpload() {
       <div className="h-[1px] w-full border-[1px] border-neutral-800 mt-2 mb-8" />
 
       {/* Video grid (sorted by camera_code) */}
-      <div className="h-auto w-full grid grid-cols-3 gap-6">
-        {/* Null Identifier if there are no videos */}
+      <div className="h-auto w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {sortedVideos.length === 0 && (
           <div className="w-full text-xs text-neutral-400 mb-4">
             No videos found for this workspace.
           </div>
         )}
 
-        {/* Mapping videos if not null */}
         {sortedVideos.map((v) => (
           <VideoCard
             key={v.id}
@@ -446,38 +514,38 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
-  // --- NEW: preview url state (signed GET)
+  // preview url state (signed GET)
   const [previewUrl, setPreviewUrl] = useState(null)
   const [loadingPreview, setLoadingPreview] = useState(false)
-  const [previewTries, setPreviewTries] = useState(0) // for one retry on 403/expired
+  const [previewTries, setPreviewTries] = useState(0) // retry once on error/expiry
 
   // editable fields (only allowed in 'uploaded')
   const [fileName, setFileName] = useState(v.file_name || "")
   const [cameraLabel, setCameraLabel] = useState(v.camera_label || "")
+  const [cameraCode, setCameraCode] = useState(v.camera_code || "CAM-001")
+  const [cameraCodeErr, setCameraCodeErr] = useState("")
   const [recordedAtLocal, setRecordedAtLocal] = useState(isoToLocalInput(v.recorded_at))
 
   useEffect(() => {
     // keep dialog fields in sync if v changes externally
     setFileName(v.file_name || "")
     setCameraLabel(v.camera_label || "")
+    setCameraCode(v.camera_code || "CAM-001")
     setRecordedAtLocal(isoToLocalInput(v.recorded_at))
-  }, [v.id, v.file_name, v.camera_label, v.recorded_at])
+  }, [v.id, v.file_name, v.camera_label, v.camera_code, v.recorded_at])
 
-  // --- NEW: fetch a short-lived preview URL lazily
   async function loadPreview() {
     if (!wid || !v?.id) return
     try {
       setLoadingPreview(true)
       const url = await getPreviewUrl(wid, v.id)
       if (!url) {
-        console.warn("[videos:url] response missing url field for", v.id)
+        console.warn("[videos:url] missing url for", v.id)
         setPreviewUrl(null)
         return
       }
       setPreviewUrl(url)
-      if (process.env.NODE_ENV !== "production") {
-        console.log("[videos:url] ready for", v.id)
-      }
+      console.log("[videos:url] ready for", v.id)
     } catch (e) {
       console.warn("[videos:url] failed:", e?.message || e)
       setPreviewUrl(null)
@@ -486,8 +554,8 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
     }
   }
 
+  // refetch preview on wid/vid change
   useEffect(() => {
-    // reset + fetch on wid/vid change
     setPreviewUrl(null)
     setPreviewTries(0)
     loadPreview()
@@ -502,53 +570,55 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
   async function doAnalyze() {
     try {
       setPendingAnalyze(true)
-      if (process.env.NODE_ENV !== "production") {
-        console.log("[videos:enqueue] →", { wid, vid: v.id })
-      }
-      const res = await enqueueVideo(wid, v.id) // PATCH: capture response
-      if (process.env.NODE_ENV !== "production") {
-        console.log("[videos:enqueue] response:", res) // PATCH: log backend payload
-      }
+      console.log("[videos:enqueue] →", { wid, vid: v.id })
+      const res = await enqueueVideo(wid, v.id)
+      console.log("[videos:enqueue] response:", res)
+
       // Optimistic flip so poller starts immediately
       onChange({ ...v, status: "queued" })
 
-      // One confirm refresh so the UI shows whatever backend wrote (queued/processing)
+      // Confirm refresh against backend truth
       if (typeof refreshAll === "function") {
         await refreshAll()
-        if (process.env.NODE_ENV !== "production") {
-          console.log("[videos:enqueue] refreshAll() completed")
-        }
+        console.log("[videos:enqueue] refreshAll() completed")
       }
 
-      toast("Analyze queued", {
-        description: v.file_name || v.id,
-      })
+      toast.success("Analyze queued", { description: v.file_name || v.id })
     } catch (e) {
       console.error(e)
-      toast("Analyze enqueue failed", { description: String(e?.message || e) })
+      toast.error("Analyze enqueue failed", { description: String(e?.message || e) })
     } finally {
       setPendingAnalyze(false)
     }
   }
 
   async function doSave() {
-    if (!canEdit) return alert("Only videos in 'uploaded' state can be edited.")
+    if (!canEdit) {
+      toast.error("Only videos in 'uploaded' state can be edited.")
+      return
+    }
+    const normCode = normalizeCameraCode(cameraCode)
+    if (!isValidCameraCode(normCode)) {
+      setCameraCodeErr("Camera code must start with 'CAM-' and contain A–Z, 0–9, or '-' only.")
+      toast.error("Invalid camera code")
+      return
+    }
     try {
       setSaving(true)
       const payload = {
         file_name: fileName.trim() || null,
         camera_label: cameraLabel.trim() || null,
+        camera_code: normCode,
         recorded_at: localDateTimeToISO(recordedAtLocal) || null,
       }
-      if (process.env.NODE_ENV !== "production") {
-        console.log("[videos:patch] →", { wid, vid: v.id, payload })
-      }
+      console.log("[videos:patch] →", { wid, vid: v.id, payload })
       const updated = await patchVideo(wid, v.id, payload)
       onChange(updated)
       setOpen(false)
+      toast.success("Saved changes")
     } catch (e) {
       console.error(e)
-      alert(String(e?.message || e || "Failed to save changes"))
+      toast.error(String(e?.message || e || "Failed to save changes"))
     } finally {
       setSaving(false)
     }
@@ -558,15 +628,14 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
     if (confirm.trim() !== confirmTarget) return
     try {
       setDeleting(true)
-      if (process.env.NODE_ENV !== "production") {
-        console.log("[videos:delete] →", { wid, vid: v.id })
-      }
+      console.log("[videos:delete] →", { wid, vid: v.id })
       await deleteVideo(wid, v.id)
       onRemove(v.id)
       setOpen(false)
+      toast.success("Video deleted")
     } catch (e) {
       console.error(e)
-      alert(String(e?.message || e || "Failed to delete video"))
+      toast.error(String(e?.message || e || "Failed to delete video"))
     } finally {
       setDeleting(false)
     }
@@ -592,7 +661,7 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
             <DialogHeader>
               <DialogTitle>Edit Video Details</DialogTitle>
               <DialogDescription>
-                You can edit the file name, camera label, and recorded time while status is <span className="font-mono">uploaded</span>.
+                You can edit the file name, camera label, camera code, and recorded time while status is <span className="font-mono">uploaded</span>.
               </DialogDescription>
             </DialogHeader>
 
@@ -616,6 +685,27 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
                   onChange={(e) => setCameraLabel(e.target.value)}
                   disabled={!canEdit}
                 />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor={`cc-${v.id}`}>Camera Code</Label>
+                <Input
+                  id={`cc-${v.id}`}
+                  value={cameraCode}
+                  onChange={(e) => {
+                    const norm = normalizeCameraCode(e.target.value)
+                    setCameraCode(norm)
+                    setCameraCodeErr(isValidCameraCode(norm) ? "" : "Must start with 'CAM-' and use A–Z, 0–9, or '-'")
+                  }}
+                  disabled={!canEdit}
+                />
+                {cameraCodeErr ? (
+                  <p className="text-xs text-red-400">{cameraCodeErr}</p>
+                ) : (
+                  <p className="text-xs text-neutral-500">
+                    FE-enforced. Must start with <span className="font-mono">CAM-</span>.
+                  </p>
+                )}
               </div>
 
               <div className="grid gap-2">
@@ -668,14 +758,13 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
       {/* Preview */}
       {previewUrl ? (
         <video
-          key={previewUrl} /* reloads when refreshed */
+          key={previewUrl}
           src={previewUrl}
           controls
           preload="metadata"
           playsInline
           className="rounded-md w-full h-52 object-cover bg-black/40 border border-neutral-800"
           onError={() => {
-            // once-only refresh if URL expired
             if (previewTries < 1) {
               setPreviewTries((n) => n + 1)
               loadPreview()
@@ -694,7 +783,7 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
         </div>
       )}
 
-      {/* PATCH: tiny status pill */}
+      {/* Status pill */}
       <div className="mt-2">
         <span
           className={[
@@ -720,10 +809,11 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
             type="button"
             disabled={!canAnalyze || pendingAnalyze}
             onClick={doAnalyze}
-            className={`text-xs px-3 border-[1px] rounded-sm transition-all duration-300 ease-in-out ${canAnalyze && !pendingAnalyze
-              ? "border-orange-500 hover:bg-orange-500 hover:cursor-pointer"
-              : "opacity-50 cursor-not-allowed border-neutral-700"
-              }`}
+            className={`text-xs px-3 border-[1px] rounded-sm transition-all duration-300 ease-in-out ${
+              canAnalyze && !pendingAnalyze
+                ? "border-orange-500 hover:bg-orange-500 hover:cursor-pointer"
+                : "opacity-50 cursor-not-allowed border-neutral-700"
+            }`}
           >
             {pendingAnalyze ? "Queuing…" : v.status === "uploaded" ? "Analyze" : "Analyzing…"}
           </button>

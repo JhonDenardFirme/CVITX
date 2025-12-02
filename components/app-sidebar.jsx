@@ -106,7 +106,7 @@ export function AppSidebar(props) {
     return [
       { title: "Dashboard", icon: HardDriveUpload, href: safe("/dashboard") },
 
-      /*
+      
       { title: "Footage Upload", icon: HardDriveUpload, href: safe("/footage-uploads") },
       { title: "Indexing", icon: PanelRightClose, href: safe("/indexing") },
       {
@@ -117,7 +117,7 @@ export function AppSidebar(props) {
           { title: "Graph Summary", icon: ChartBarStacked, href: safe("/analytics/graphs") },
         ],
       },
-      */
+      
       { title: "Image Analysis", icon: Aperture, href: safe("/image-analysis") },
       { title: "AI Technical Writer", icon: FileText, href: safe("/reports/technical-writer") },
     ];
