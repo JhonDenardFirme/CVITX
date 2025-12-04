@@ -6,22 +6,26 @@
   -----------------
   Purpose:
     Frontend module for uploading CCTV footage to a workspace, listing videos,
-    editing allowed metadata while status=uploaded, and enqueueing analysis.
+    editing allowed metadata while status=uploaded, enqueueing analysis, and
+    showing per-video progress.
 
   Aligned API (via Next.js /api proxy):
     GET    /api/workspaces/:wid/videos
-    POST   /api/workspaces/:wid/files/presign                  -> { video_id, key, url }  (requires camera_code, file_size_bytes)
-    POST   /api/workspaces/:wid/videos/commit                  -> JSON body; creates/updates `videos` row
-    PATCH  /api/workspaces/:wid/videos/:vid                    -> edits row (accepts cameraLabel, recordedAt only)
-    DELETE /api/workspaces/:wid/videos/:vid                    -> deletes row
-    POST   /api/workspaces/:wid/videos/:vid/enqueue            -> queue analysis
-    GET    /api/workspaces/:wid/videos/:vid/url                -> { url, ttl }
+    POST   /api/workspaces/:wid/videos/presign             -> VideoPresignIn
+    POST   /api/workspaces/:wid/videos/commit              -> VideoCommitIn (creates/updates `videos` row)
+    PATCH  /api/workspaces/:wid/videos/:vid                -> edits row (cameraLabel, recordedAt only)
+    DELETE /api/workspaces/:wid/videos/:vid                -> deletes row (requires {confirmCameraCode})
+    POST   /api/workspaces/:wid/videos/:vid/enqueue        -> queue analysis (PROCESS_VIDEO)
+    GET    /api/workspaces/:wid/videos/:vid/progress       -> VideoProgressOut (status, counts, percent)
+    GET    /api/workspaces/:wid/videos/:vid/url            -> short-lived signed GET URL for preview
 
   Canonical flow:
-    1) Presign upload for the selected MP4 (content-type must match) → returns { video_id, key (s3_key_raw), url }
-    2) PUT the file to S3 using returned presigned URL
+    1) Presign upload for the selected MP4 (content-type must match) via /videos/presign
+       → returns { videoId, s3KeyRaw, presignedUrl, ... }
+    2) PUT the file to S3 using the returned presignedUrl
     3) Commit the upload with a JSON body (see handleSubmit) — backend writes/updates `videos` row
-    4) (Later) Enqueue analysis for a video in 'uploaded' status
+    4) Enqueue analysis for a video in 'uploaded' status
+    5) Poll status globally and per-video progress via /videos/:vid/progress
 
   Notes:
     - recordedAt is sent as ISO-8601 (UTC) derived from <input type="datetime-local">
@@ -113,13 +117,49 @@ function fmtHuman(dt) {
   return `${dPart} | ${tPart}`
 }
 
+/* ---------------- shape normalizer ---------------- */
+
+/**
+ * Normalize backend VideoRowOut (camelCase or snake_case) into
+ * a frontend-friendly snake_case shape used by this component.
+ */
+function normalizeVideoRow(raw) {
+  if (!raw) return null
+  return {
+    id: raw.id,
+    workspace_id: raw.workspaceId ?? raw.workspace_id,
+    workspace_code: raw.workspaceCode ?? raw.workspace_code ?? null,
+    file_name: raw.fileName ?? raw.file_name ?? "",
+    camera_label: raw.cameraLabel ?? raw.camera_label ?? "",
+    camera_code: raw.cameraCode ?? raw.camera_code ?? "",
+    recorded_at: raw.recordedAt ?? raw.recorded_at ?? null,
+    s3_key_raw: raw.s3KeyRaw ?? raw.s3_key_raw ?? "",
+    frame_stride: raw.frameStride ?? raw.frame_stride ?? 3,
+    status: raw.status ?? "uploaded",
+    created_at: raw.createdAt ?? raw.created_at ?? null,
+    updated_at: raw.updatedAt ?? raw.updated_at ?? null,
+    error_msg: raw.errorMsg ?? raw.error_msg ?? null,
+    processing_started_at:
+      raw.processingStartedAt ?? raw.processing_started_at ?? null,
+    processing_finished_at:
+      raw.processingFinishedAt ?? raw.processing_finished_at ?? null,
+  }
+}
+
 /* ---------------- API helpers (proxying via /api) ---------------- */
 
 async function listVideos(wid) {
   const r = await fetch(`/api/workspaces/${wid}/videos`, { cache: "no-store" })
   if (!r.ok) throw new Error(await r.text())
-  return r.json()
+  const data = await r.json()
+  const items = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.items)
+      ? data.items
+      : []
+  return items.map((v) => normalizeVideoRow(v)).filter(Boolean)
 }
+
 async function patchVideo(wid, vid, body) {
   const r = await fetch(`/api/workspaces/${wid}/videos/${vid}`, {
     method: "PATCH",
@@ -127,14 +167,32 @@ async function patchVideo(wid, vid, body) {
     body: JSON.stringify(body),
   })
   if (!r.ok) throw new Error(await r.text())
-  return r.json()
+  const data = await r.json()
+  const raw = data?.video ?? data
+  return normalizeVideoRow(raw)
 }
-async function deleteVideo(wid, vid) {
-  const r = await fetch(`/api/workspaces/${wid}/videos/${vid}`, { method: "DELETE" })
+
+async function deleteVideo(wid, vid, confirmCameraCode) {
+  const r = await fetch(`/api/workspaces/${wid}/videos/${vid}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmCameraCode }),
+  })
   if (!r.ok) throw new Error(await r.text())
 }
+
 async function enqueueVideo(wid, vid) {
   const r = await fetch(`/api/workspaces/${wid}/videos/${vid}/enqueue`, { method: "POST" })
+  if (!r.ok) throw new Error(await r.text())
+  return r.json()
+}
+
+// Video progress (counts + percent) for a given variant (default "cmt")
+async function getVideoProgress(wid, vid, variant = "cmt") {
+  const r = await fetch(
+    `/api/workspaces/${wid}/videos/${vid}/progress?variant=${encodeURIComponent(variant)}`,
+    { cache: "no-store" }
+  )
   if (!r.ok) throw new Error(await r.text())
   return r.json()
 }
@@ -195,26 +253,22 @@ export default function FootageUpload() {
         if (ignore) return
 
         console.groupCollapsed(`[videos:list] wid=${wid}`)
-        if (!Array.isArray(arr)) {
-          console.warn("Response not array:", arr)
-        } else {
-          console.log(`count: ${arr.length}`)
-          if (arr.length) {
-            console.table(
-              arr.map((v) => ({
-                id: v.id,
-                file_name: v.file_name,
-                camera_code: v.camera_code,
-                camera_label: v.camera_label,
-                status: v.status,
-                recorded_at: v.recorded_at,
-              }))
-            )
-          }
+        console.log(`count: ${arr.length}`)
+        if (arr.length) {
+          console.table(
+            arr.map((v) => ({
+              id: v.id,
+              file_name: v.file_name,
+              camera_code: v.camera_code,
+              camera_label: v.camera_label,
+              status: v.status,
+              recorded_at: v.recorded_at,
+            }))
+          )
         }
         console.groupEnd()
 
-        setVideos(Array.isArray(arr) ? arr : [])
+        setVideos(arr)
       } catch (e) {
         console.error("[videos:list] failed:", e)
         setVideos([])
@@ -237,13 +291,13 @@ export default function FootageUpload() {
     if (!wid) return
     try {
       const arr = await listVideos(wid)
-      setVideos(Array.isArray(arr) ? arr : [])
+      setVideos(arr)
     } catch (e) {
       console.warn("[videos:refresh] failed:", e)
     }
   }
 
-  // Poll while any queued/processing
+  // Poll while any queued/processing (global list refresh)
   useEffect(() => {
     if (!wid) return
     const anyPending = videos.some((v) => v.status === "queued" || v.status === "processing")
@@ -290,8 +344,8 @@ export default function FootageUpload() {
 
     setUploading(true)
     try {
-      // 1) presign → MUST return { video_id, key, url } (backend requires camera_code + file_size_bytes)
-      const presignRes = await fetch(`/api/workspaces/${wid}/files/presign`, {
+      // 1) presign → /videos/presign (VideoPresignIn)
+      const presignRes = await fetch(`/api/workspaces/${wid}/videos/presign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -299,22 +353,30 @@ export default function FootageUpload() {
           content_type: file.type || "video/mp4",
           file_size_bytes: file.size,
           camera_code, // normalized above
+          frame_stride: 3,
+          recorded_at: recorded_at,
+          workspace_code: currentWorkspace?.code || null,
         }),
       })
       if (!presignRes.ok) throw new Error(await presignRes.text())
       const presigned = await presignRes.json()
-      const video_id = presigned?.video_id
-      const key = presigned?.key
-      const putUrl = presigned?.url
+      const video_id =
+        presigned?.videoId ?? presigned?.video_id ?? presigned?.id ?? null
+      const key =
+        presigned?.s3KeyRaw ?? presigned?.s3_key_raw ?? presigned?.key ?? null
+      const putUrl =
+        presigned?.presignedUrl ?? presigned?.url ?? presigned?.put_url ?? null
       if (!video_id || !key || !putUrl) {
-        throw new Error("Presign missing required fields { video_id, key, url }")
+        throw new Error(
+          "Presign missing required fields (videoId/s3KeyRaw/presignedUrl)"
+        )
       }
       console.log("[videos:create] presigned", { video_id, key })
 
       // 2) upload
       await putToS3(putUrl, file)
 
-      // 3) commit — BACKEND REQUIRES JSON BODY (no query params)
+      // 3) commit — backend requires JSON body (no query params)
       const commitBody = {
         videoId: video_id,
         s3KeyRaw: key,
@@ -416,7 +478,9 @@ export default function FootageUpload() {
                     onChange={(e) => {
                       const norm = normalizeCameraCode(e.target.value)
                       setForm((s) => ({ ...s, cameraCode: norm }))
-                      setCamErr(isValidCameraCode(norm) ? "" : "Must start with 'CAM-' and use A–Z, 0–9, or '-'")
+                      setCamErr(
+                        isValidCameraCode(norm) ? "" : "Must start with 'CAM-' and use A–Z, 0–9, or '-'"
+                      )
                     }}
                   />
                   {camErr ? (
@@ -529,10 +593,13 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [previewTries, setPreviewTries] = useState(0) // retry once on error/expiry
 
+  // progress state (per-video polling)
+  const [progress, setProgress] = useState(null)
+
   // editable fields (only allowed in 'uploaded')
   const [fileName, setFileName] = useState(v.file_name || "")
   const [cameraLabel, setCameraLabel] = useState(v.camera_label || "")
-  // cameraCode is immutable post-commit; display-only
+  // cameraCode is immutable post-commit; display-only and used for delete confirm
   const [cameraCode] = useState(v.camera_code || "CAM-001")
   const [recordedAtLocal, setRecordedAtLocal] = useState(isoToLocalInput(v.recorded_at))
 
@@ -572,9 +639,51 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wid, v?.id])
 
+  // Per-card progress polling while queued/processing
+  useEffect(() => {
+    if (!wid || !v?.id) return
+    if (v.status !== "queued" && v.status !== "processing") {
+      setProgress(null)
+      return
+    }
+
+    let cancelled = false
+
+    async function pollOnce() {
+      try {
+        const j = await getVideoProgress(wid, v.id)
+        if (cancelled) return
+        setProgress({
+          status: j.status,
+          percent: j.percent,
+          expectedSnapshots: j.expectedSnapshots,
+          processedSnapshots: j.processedSnapshots,
+          processedOk: j.processedOk,
+          processedErr: j.processedErr,
+        })
+
+        if ((j.status === "done" || j.status === "error") && typeof refreshAll === "function") {
+          await refreshAll()
+        }
+      } catch (e) {
+        if (!cancelled) {
+          console.warn("[videos:progress] poll failed:", e?.message || e)
+        }
+      }
+    }
+
+    pollOnce()
+    const id = setInterval(pollOnce, 5000)
+
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [wid, v?.id, v.status, refreshAll])
+
   const canAnalyze = v.status === "uploaded" && !pendingAnalyze
   const canEdit = v.status === "uploaded"
-  const confirmTarget = (v.file_name || "").trim()
+  const confirmTarget = (cameraCode || "").trim()
   const [confirm, setConfirm] = useState("")
 
   async function doAnalyze() {
@@ -584,7 +693,7 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
       const res = await enqueueVideo(wid, v.id)
       console.log("[videos:enqueue] response:", res)
 
-      // Optimistic flip so poller starts immediately
+      // Optimistic flip so pollers start immediately
       onChange({ ...v, status: "queued" })
 
       // Confirm refresh against backend truth
@@ -632,7 +741,7 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
     try {
       setDeleting(true)
       console.log("[videos:delete] →", { wid, vid: v.id })
-      await deleteVideo(wid, v.id)
+      await deleteVideo(wid, v.id, confirmTarget)
       onRemove(v.id)
       setOpen(false)
       toast.success("Video deleted")
@@ -725,12 +834,15 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
             <div className="mt-6 border-t border-neutral-800 pt-4">
               <p className="text-sm font-medium text-red-400 mb-2">Danger Zone</p>
               <p className="text-xs text-neutral-400 mb-3">
-                To permanently delete this video, type{" "}
-                <span className="font-semibold text-neutral-200">{confirmTarget || "(no filename)"}</span> below.
+                To permanently delete this video, type the camera code{" "}
+                <span className="font-semibold text-neutral-200">
+                  {confirmTarget || "(no camera code)"}
+                </span>{" "}
+                below.
               </p>
               <div className="flex items-center gap-2">
                 <Input
-                  placeholder={confirmTarget ? `Type ${confirmTarget}` : "No filename set"}
+                  placeholder={confirmTarget ? `Type ${confirmTarget}` : "No camera code set"}
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}
                 />
@@ -793,6 +905,22 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
           {String(v.status || "-")}
         </span>
       </div>
+
+      {/* Progress text */}
+      {progress &&
+        (v.status === "queued" || v.status === "processing") && (
+          <div className="mt-1">
+            <p className="text-[11px] text-neutral-400">
+              Processing:{" "}
+              {typeof progress.percent === "number" && Number.isFinite(progress.percent)
+                ? `${progress.percent.toFixed(2)}%`
+                : `${progress.percent}%`}{" "}
+              {progress.expectedSnapshots
+                ? `(${progress.processedSnapshots}/${progress.expectedSnapshots})`
+                : `(${progress.processedSnapshots} snapshots)`}
+            </p>
+          </div>
+        )}
 
       {/* Meta rows */}
       <div className="flex flex-col w-full justify-between items-center px-1">

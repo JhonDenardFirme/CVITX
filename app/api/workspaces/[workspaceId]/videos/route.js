@@ -2,9 +2,15 @@
 import { authHeaders, buildBackendUrl, getWid, passThru } from "../_utils";
 
 /**
- * GET  -> FastAPI GET  /workspaces/{wid}/videos         (list)
- * POST -> FastAPI POST /workspaces/{wid}/videos         (create row)
- * Pass-through, no shape changes. Frontend expects snake_case fields.
+ * GET  -> FastAPI GET  /workspaces/{wid}/videos         (list only)
+ *
+ * Creation and upload of videos are handled through:
+ *   POST /workspaces/{wid}/videos/presign
+ *   POST /workspaces/{wid}/videos/commit
+ *
+ * There is no POST /workspaces/{wid}/videos endpoint in the backend.
+ * This proxy performs a pass-through with no shape changes.
+ * The frontend expects snake_case fields from the backend response.
  */
 export async function GET(req, ctx) {
   try {
@@ -17,19 +23,5 @@ export async function GET(req, ctx) {
   } catch (e) {
     console.error("[videos:list] proxy error:", e);
     return new Response("Proxy error (videos list).", { status: 500 });
-  }
-}
-
-export async function POST(req, ctx) {
-  try {
-    const wid = await getWid(ctx.params);
-    const url = buildBackendUrl(`/workspaces/${wid}/videos`);
-    const headers = { ...(await authHeaders()), "content-type": "application/json" };
-    const body = await req.text();
-    const r = await fetch(url, { method: "POST", headers, body, cache: "no-store" });
-    return passThru(r);
-  } catch (e) {
-    console.error("[videos:create] proxy error:", e);
-    return new Response("Proxy error (videos create).", { status: 500 });
   }
 }

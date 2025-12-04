@@ -20,6 +20,14 @@ import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { EvervaultCard, Icon } from "@/components/ui/evervault-card"
 
+/**
+ * Footage Uploads Page
+ * --------------------
+ * Hosts the FootageUpload module for a single workspace.
+ * Workspace identity and metadata are resolved from the store first,
+ * then fall back to the dynamic [workspaceId] route param.
+ * All video API integration is handled inside FootageUpload.
+ */
 export default function Page() {
   const params = useParams()
   const widFromParams = params?.workspaceId
@@ -29,7 +37,9 @@ export default function Page() {
 
   const enriched = useMemo(() => {
     const targetId = current?.id || widFromParams
-    if (!targetId) return { code: "-", title: "-", description: "-" }
+    if (!targetId) {
+      return { code: "-", title: "-", description: "-" }
+    }
 
     const match = Array.isArray(all) ? all.find((w) => w.id === targetId) : null
     return {

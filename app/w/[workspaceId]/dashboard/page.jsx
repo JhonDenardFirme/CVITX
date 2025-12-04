@@ -8,15 +8,19 @@
     Hub page composing the Playback player (left), a summary counter (right),
     and a bottom panel that switches among analytics and utilities.
 
-  Alignment changes in this rewrite:
-    - Header enrichment is now *param-aware*:
+  Alignment notes:
+    - Header enrichment is param-aware:
       If the store's currentWorkspace is empty on first mount, we fall back to
       the route param (workspaceId) and try to resolve details from `workspaces`.
-    - All other behaviors remain source-of-truth in their respective modules:
-      • FootagePlayback: owns playbackMode ('all' | 'video') and signed URLs.
-      • DetectionCounter / IndexingRecords / etc.: read playback scope from the store.
-
-  No props are passed to child modules by design—modules discover data via the store.
+    - Child modules remain the source of truth for their own behavior:
+      • FootagePlayback: owns playbackMode ('all' | 'video') and signed URLs,
+        and, via the store, will drive the detection scope and detections fetch.
+      • DetectionCounter / IndexingRecords / Analytics modules: read playback
+        and detection scope from the central store; this page does not keep any
+        local playback/detections state.
+    - IndexingRecords is the canonical detections table module for this page.
+    - This file does not talk directly to any API or /files/* routes. All IO
+      flows through child modules and the shared store/lib.
 */
 
 import { useMemo } from 'react'
@@ -27,7 +31,7 @@ import { useAppStore } from '@/lib/store'
 import FootagePlayback from '@/components/modules/FootagePlayback'
 import FootageUpload from '@/components/modules/FootageUpload'
 import VehicleDetection from '@/components/modules/VehicleDetection'
-import IndexingRecords from '@/components/modules/IndexingRecordsDraft'
+import IndexingRecords from '@/components/modules/IndexingRecords'
 import TechnicalWriter from '@/components/modules/TechnicalWriter'
 import DetectionSummary from '@/components/modules/DetectionSummary'
 import GraphSummary from '@/components/modules/GraphSummary'
@@ -43,14 +47,11 @@ import {
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
 import { Separator } from '@/components/ui/separator'
-import { SidebarTrigger } from '@/components/ui/sidebar' // Only the trigger; no Provider/Inset here
+import { SidebarTrigger } from '@/components/ui/sidebar'
 
 export default function Page() {
-  // Panel & record selection (unchanged)
+  // Bottom panel selection (tab state)
   const activePanel = useAppStore((s) => s.activePanel)
-  const setActivePanel = useAppStore((s) => s.setActivePanel)
-  const selectedRecordId = useAppStore((s) => s.selectedRecordId)
-  const setSelectedRecordId = useAppStore((s) => s.setSelectedRecordId)
 
   // Workspace context from store
   const current = useAppStore((s) => s.currentWorkspace)
@@ -66,10 +67,12 @@ export default function Page() {
     const primaryId = current?.id || null
 
     // If store is empty on first mount, try to resolve via route param
-    const resolvedId = primaryId || (typeof widFromParams === 'string' ? widFromParams : null)
+    const resolvedId =
+      primaryId || (typeof widFromParams === 'string' ? widFromParams : null)
 
     // Try to find a matching workspace in the cached list
-    const match = resolvedId && Array.isArray(all) ? all.find(w => w.id === resolvedId) : null
+    const match =
+      resolvedId && Array.isArray(all) ? all.find((w) => w.id === resolvedId) : null
 
     // Compose final fields with a strict fallback to '-'
     const code = (current?.code || match?.code || '-') || '-'
@@ -117,14 +120,7 @@ export default function Page() {
         <div className="w-full rounded-xl bg-neutral-900 h-auto">
           {activePanel === 'Footage Upload' && <FootageUpload />}
 
-          {activePanel === 'Indexing' && (
-            <IndexingRecords
-              onViewRecord={(id) => {
-                setSelectedRecordId(id)
-                setActivePanel('Vehicle Detection')
-              }}
-            />
-          )}
+          {activePanel === 'Indexing' && <IndexingRecords />}
 
           {activePanel === 'AI Technical Writer' && <TechnicalWriter />}
 
@@ -134,6 +130,8 @@ export default function Page() {
               <GraphSummary />
             </div>
           )}
+
+          {activePanel === 'Vehicle Detection' && <VehicleDetection />}
         </div>
       </div>
     </>

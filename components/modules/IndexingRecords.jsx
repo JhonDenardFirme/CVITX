@@ -1,7 +1,7 @@
 // components/modules/IndexingRecords.jsx
 "use client"
 
-import { useState, useEffect, useMemo, Fragment } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { useParams } from "next/navigation"
 import { useAppStore } from "@/lib/store"
 
@@ -50,7 +50,6 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
-import { Badge } from "@/components/ui/badge"
 
 import {
   Dialog,
@@ -114,10 +113,11 @@ function fmtHMS(dateStr) {
 
 /** compute seek offset (ms from video start) using local catalog */
 function computeSeekMs(det, videoMeta) {
-  // 1) trust API if it's a sane, non-negative number
+  // 1) trust API if it is a sane, non-negative number
   if (Number.isFinite(det?.detected_in_ms) && det.detected_in_ms >= 0) {
     return det.detected_in_ms
   }
+
   // 2) derive from timestamps (timezone-safe epoch math)
   const detAt = Date.parse(det?.detected_at || "")
   const recAt = Date.parse(videoMeta?.recorded_at || "")
@@ -125,6 +125,7 @@ function computeSeekMs(det, videoMeta) {
     Number.isFinite(detAt) && Number.isFinite(recAt)
       ? Math.max(0, detAt - recAt)
       : 0
+
   // 3) clamp to video duration if known
   const durMs = Number.isFinite(videoMeta?.durationSec)
     ? videoMeta.durationSec * 1000
@@ -152,8 +153,10 @@ function matchesNullableExact(selected, value) {
   if (!selected?.length) return true
   const wantsNull = hasNullOption(selected)
   const wantsValues = selected.filter((x) => x !== "-")
+
   if (wantsNull && isNullish(value)) return true
-  if (!wantsValues.length) return false // only "-" selected and value is NOT nullish
+  if (!wantsValues.length) return false
+
   return wantsValues.some((n) => toLower(n) === toLower(value))
 }
 
@@ -165,9 +168,8 @@ function matchesNullableColors(selected, values) {
 
   const hasColors = Array.isArray(values) && values.length > 0
   if (wantsNull && !hasColors) return true
-  if (!wantsValues.length) return false // only "-" selected and item has some colors
+  if (!wantsValues.length) return false
 
-  // standard overlap (case-insensitive)
   const set = new Set((values || []).map((v) => toLower(v)))
   return wantsValues.some((n) => set.has(toLower(n)))
 }
@@ -184,11 +186,9 @@ function trimModelName(model) {
 function matchesNullableModel(selectedModels, storedModel) {
   if (!selectedModels?.length) return true
 
-  // NULL case
   const wantsNull = hasNullOption(selectedModels)
   if (wantsNull && isNullish(storedModel)) return true
 
-  // Non-NULL matching (contains or trimmed equality)
   const nonNullSelections = selectedModels.filter((x) => x !== "-")
   if (!nonNullSelections.length) return false
 
@@ -203,12 +203,13 @@ function matchesNullableModel(selectedModels, storedModel) {
 }
 
 // render “label (conf)” with rules:
-// - if value is null/empty → print "-" and DO NOT print conf
+// - if value is null/empty → print "-" and do not print conf
 // - if conf < 0.5 → gray out both label and conf
 function renderLabelWithConf(label, conf) {
   const hasLabel = !isNullish(label)
   if (!hasLabel) return <span>-</span>
   const low = typeof conf === "number" && conf < 0.5
+
   return (
     <span className={low ? "text-neutral-700" : undefined}>
       {label}{" "}
@@ -226,9 +227,141 @@ function renderLabelWithConf(label, conf) {
 }
 
 /* =========================================================================
+   Detection row normalization (DetectionOut → table-friendly shape)
+   ========================================================================= */
+
+function normalizeVideoDetectionRow(det, ctx) {
+  const videoId = ctx?.videoId || det.videoId || null
+  const vm = ctx?.videoMeta || {}
+  const workspaceId = ctx?.workspaceId || vm.workspace_id || null
+
+  const colorsArr = Array.isArray(det.colors)
+    ? det.colors
+        .map((c) =>
+          c && c.base ? String(c.base).toUpperCase().trim() : ""
+        )
+        .filter(Boolean)
+    : []
+
+  const trackId =
+    typeof det.trackId === "number"
+      ? det.trackId
+      : typeof det.track_id === "number"
+      ? det.track_id
+      : null
+
+  const camCode = vm.camera_code || vm.cameraCode || ""
+  const suffix =
+    trackId !== null && trackId !== undefined
+      ? String(trackId).padStart(4, "0")
+      : String(det.id || "").slice(0, 8)
+
+  const displayId =
+    det.displayId ||
+    det.display_id ||
+    (camCode ? `${camCode}-${suffix}` : suffix)
+
+  const detectedAt = det.detectedAt || det.detected_at || null
+  const detectedInMsRaw =
+    typeof det.detectedInMs === "number"
+      ? det.detectedInMs
+      : typeof det.detected_in_ms === "number"
+      ? det.detected_in_ms
+      : null
+
+  const detectedInMs =
+    Number.isFinite(detectedInMsRaw) && detectedInMsRaw >= 0
+      ? detectedInMsRaw
+      : null
+
+  const assets = det.assets || {}
+
+  const typeLabel =
+    det.typeLabel ||
+    det.type ||
+    det.yoloType ||
+    det.yolo_type ||
+    ""
+
+  const typeConf =
+    typeof det.typeConf === "number"
+      ? det.typeConf
+      : typeof det.type_conf === "number"
+      ? det.type_conf
+      : null
+
+  const makeLabel = det.makeLabel || det.make || ""
+
+  const makeConf =
+    typeof det.makeConf === "number"
+      ? det.makeConf
+      : typeof det.make_conf === "number"
+      ? det.make_conf
+      : null
+
+  const modelLabel = det.modelLabel || det.model || ""
+
+  const modelConf =
+    typeof det.modelConf === "number"
+      ? det.modelConf
+      : typeof det.model_conf === "number"
+      ? det.model_conf
+      : null
+
+  const plateText = det.plateText || det.plate_text || ""
+
+  return {
+    id: det.id,
+    detection_id: det.id,
+    analysis_id: det.analysisId || det.analysis_id || null,
+    run_id: det.runId || det.run_id || null,
+    track_id: trackId,
+    workspace_id: workspaceId,
+    video_id: videoId || vm.id || vm.video_id || null,
+
+    display_id: displayId,
+
+    snapshot_url:
+      assets.vehicleUrl ||
+      assets.annotatedUrl ||
+      null,
+    plate_url: assets.plateUrl || null,
+
+    type: typeLabel,
+    type_conf: typeConf,
+
+    make: makeLabel,
+    make_conf: makeConf,
+
+    model: modelLabel,
+    model_conf: modelConf,
+
+    plate_text: plateText,
+    colors: colorsArr,
+
+    detected_at: detectedAt,
+    detected_in_ms: detectedInMs,
+    recorded_at: vm.recorded_at || vm.recordedAt || null,
+
+    video_title: vm.title || vm.file_name || vm.fileName || "",
+    camera_code: vm.camera_code || vm.cameraCode || "",
+    camera_label: vm.camera_label || vm.cameraLabel || "",
+  }
+}
+
+/* =========================================================================
    Combined Edit + Danger Zone (single dialog styled like Workspace)
    ========================================================================= */
-function EditDangerDialog({ item, open, onOpenChange, onSaved, onDeleted }) {
+
+function EditDangerDialog({
+  item,
+  workspaceId,
+  videoId,
+  open,
+  onOpenChange,
+  onSaved,
+  onDeleted,
+}) {
   const [form, setForm] = useState({
     type: item.type || "",
     make: item.make || "",
@@ -242,47 +375,83 @@ function EditDangerDialog({ item, open, onOpenChange, onSaved, onDeleted }) {
   const [confirm, setConfirm] = useState("")
 
   useEffect(() => {
-    if (!open) setConfirm("")
+    if (!open) {
+      setConfirm("")
+    }
   }, [open])
 
   const doSave = async () => {
+    if (!workspaceId || !videoId) {
+      alert("Missing workspace or video context for save.")
+      return
+    }
+
     setSaving(true)
     try {
       const payload = {
-        type: form.type || null,
-        make: form.make || null,
-        model: form.model || null,
-        plate_text: form.plate_text || null,
-        colors: form.colors ? [form.colors] : [],
+        typeLabel: form.type || undefined,
+        makeLabel: form.make || undefined,
+        modelLabel: form.model || undefined,
+        plateText: form.plate_text || undefined,
+        colors: form.colors
+          ? [
+              {
+                base: String(form.colors).toUpperCase().trim(),
+                finish: null,
+                lightness: null,
+                conf: 0.0,
+              },
+            ]
+          : undefined,
       }
-      const r = await fetch(`/api/proxy/detections/${item.id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      const j = await r.json()
-      if (!r.ok) throw new Error("save failed")
-      onSaved(j)
+
+      const r = await fetch(
+        `/api/workspaces/${workspaceId}/videos/${videoId}/detections/${item.id}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      )
+
+      const text = await r.text()
+      if (!r.ok) {
+        let detail = "Save failed."
+        try {
+          const data = text ? JSON.parse(text) : null
+          detail =
+            data?.error?.message ||
+            data?.message ||
+            data?.detail ||
+            detail
+        } catch {
+          // ignore parse errors
+        }
+        throw new Error(detail)
+      }
+
+      const next = text ? JSON.parse(text) : null
+      if (next) {
+        onSaved(next)
+      }
       onOpenChange(false)
-    } catch {
-      alert("Save failed.")
+    } catch (err) {
+      console.error("EditDangerDialog save failed:", err)
+      alert(err.message || "Save failed.")
     } finally {
       setSaving(false)
     }
   }
 
   const doDelete = async () => {
-    if (confirm.trim() !== confirmTarget) return
     setDeleting(true)
     try {
-      const r = await fetch(`/api/proxy/detections/${item.id}`, {
-        method: "DELETE",
-      })
-      if (!r.ok) throw new Error()
-      onDeleted()
-      onOpenChange(false)
-    } catch {
-      alert("Delete failed.")
+      alert(
+        "Delete is not yet supported for video detections. This action has no effect until the backend delete or soft-delete endpoint is implemented."
+      )
+      if (typeof onDeleted === "function") {
+        onDeleted()
+      }
     } finally {
       setDeleting(false)
     }
@@ -294,7 +463,8 @@ function EditDangerDialog({ item, open, onOpenChange, onSaved, onDeleted }) {
         <DialogHeader>
           <DialogTitle>Edit Detection</DialogTitle>
           <DialogDescription>
-            Update basic attributes or delete the detection permanently.
+            Update basic attributes. Delete is not yet supported for video
+            detections.
           </DialogDescription>
         </DialogHeader>
 
@@ -309,6 +479,7 @@ function EditDangerDialog({ item, open, onOpenChange, onSaved, onDeleted }) {
               }
             />
           </div>
+
           <div className="grid gap-1 md:grid-cols-2 md:gap-3">
             <div className="grid gap-1">
               <Label className="text-neutral-500 text-xs ml-1">Make</Label>
@@ -329,6 +500,7 @@ function EditDangerDialog({ item, open, onOpenChange, onSaved, onDeleted }) {
               />
             </div>
           </div>
+
           <div className="grid gap-1 md:grid-cols-2 md:gap-3">
             <div className="grid gap-1">
               <Label className="text-neutral-500 text-xs ml-1">
@@ -371,21 +543,24 @@ function EditDangerDialog({ item, open, onOpenChange, onSaved, onDeleted }) {
         <div className="mt-6 border-t border-neutral-800 pt-4">
           <p className="text-sm font-medium text-red-400 mb-2">Danger Zone</p>
           <p className="text-xs text-neutral-400 mb-3">
-            To permanently delete this detection, type{" "}
+            Delete for video detections is not wired to the backend yet. This
+            button is intentionally disabled until the delete or soft-delete
+            endpoint is implemented. When enabled, you will need to type{" "}
             <span className="font-semibold text-neutral-200">
               {confirmTarget || "(unknown ID)"}
             </span>{" "}
-            below.
+            to confirm.
           </p>
           <div className="flex items-center gap-2">
             <Input
               placeholder={`${confirmTarget}`}
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
+              disabled
             />
             <Button
               variant="destructive"
-              disabled={confirm.trim() !== confirmTarget || deleting}
+              disabled
               onClick={doDelete}
             >
               {deleting ? "Deleting…" : "Delete"}
@@ -443,6 +618,7 @@ function normalizeDetectionToTimelineItem(row, videoMeta) {
 /* =========================================================================
    IndexingRecords (page module) — client-side filtering + pagination
    ========================================================================= */
+
 export default function IndexingRecords() {
   const currentWorkspace = useAppStore((s) => s.currentWorkspace)
 
@@ -457,7 +633,7 @@ export default function IndexingRecords() {
   const params = useParams()
   const wid = currentWorkspace?.id || params?.workspaceId || "default"
 
-  // ✅ stable selector (NO new object creation in selector)
+  // stable selector (no new object creation in selector)
   const videosById =
     useAppStore((s) => (wid ? s.videoCatalog?.[wid] : undefined) ?? EMPTY_CATALOG)
 
@@ -472,6 +648,7 @@ export default function IndexingRecords() {
   // full dataset loaded once per wid / playback scope
   const [allRecords, setAllRecords] = useState([])
   const [loading, setLoading] = useState(false)
+  const [lastError, setLastError] = useState(null)
 
   // pagination
   const [page, setPage] = useState(1)
@@ -484,70 +661,99 @@ export default function IndexingRecords() {
   const isMounted = useIsMounted()
   const addToTimeline = useAppStore((s) => s.addToTimeline)
 
-  // Load ALL records once when workspace or playback scope changes.
-  useEffect(() => {
-    let ignore = false
-    async function loadAll() {
+  // Loader: respects workspace and playback scope; reusable for initial, refresh, polling
+  const loadAll = useCallback(
+    async (opts = {}) => {
+      const { soft = false } = opts
+
       if (!wid || wid === "default") {
-        if (!ignore) {
-          setAllRecords([])
+        setAllRecords([])
+        if (!soft) {
           setLoading(false)
         }
+        setLastError(null)
         return
       }
 
-      setLoading(true)
+      if (!soft) {
+        setLoading(true)
+      }
+      setLastError(null)
+
       try {
-        const limit = 200
-        let offset = 0
-        let total = Infinity
         const bucket = []
 
-        while (offset < total) {
-          const qs = new URLSearchParams({
-            workspace_id: wid,
-            order: "detected_at_desc",
-            limit: String(limit),
-            offset: String(offset),
-          })
-
-          // 🔗 Playback hook:
-          // When the player dropdown selects a video, playbackSelectedVideoId
-          // will be set in the global store. In "video" mode, this scopes the
-          // detections list to that specific video.
-          if (playbackMode === "video" && playbackSelectedVideoId) {
-            qs.set("video_id", playbackSelectedVideoId)
-          }
-
+        // Video-scoped: detections for the selected video only
+        if (playbackMode === "video" && playbackSelectedVideoId) {
           const res = await fetch(
-            `/api/proxy/detections?${qs.toString()}`,
+            `/api/workspaces/${wid}/videos/${playbackSelectedVideoId}/detections?variant=cmt`,
             { cache: "no-store" }
           )
-          if (!res.ok) break
+          if (res.ok) {
+            const d = await res.json()
+            const items = Array.isArray(d.items) ? d.items : []
+            const videoMeta =
+              videosById[playbackSelectedVideoId] || null
+            const vidFromPayload = d.videoId || playbackSelectedVideoId
+
+            for (const det of items) {
+              bucket.push(
+                normalizeVideoDetectionRow(det, {
+                  videoId: vidFromPayload,
+                  videoMeta,
+                  workspaceId: wid,
+                })
+              )
+            }
+          } else if (res.status !== 404) {
+            throw new Error("Failed to load detections for selected video.")
+          }
+        } else {
+          // Workspace-scoped: detections for all videos via workspace endpoint
+          const res = await fetch(
+            `/api/workspaces/${wid}/detections?variant=cmt`,
+            { cache: "no-store" }
+          )
+          if (!res.ok) {
+            throw new Error("Failed to load workspace-wide detections.")
+          }
+
           const d = await res.json()
           const items = Array.isArray(d.items) ? d.items : []
-          const t = d.pagination?.total ?? d.total ?? items.length
-          total = Number.isFinite(t) ? t : items.length
-          bucket.push(...items)
-          offset += limit
-          if (items.length < limit) break
+          const videosMap = videosById || {}
+
+          for (const det of items) {
+            const vId = det.videoId || det.video_id || null
+            const videoMeta = vId && videosMap[vId] ? videosMap[vId] : null
+            bucket.push(
+              normalizeVideoDetectionRow(det, {
+                videoId: vId,
+                videoMeta,
+                workspaceId: wid,
+              })
+            )
+          }
         }
 
-        if (!ignore) {
-          setAllRecords(bucket)
-          setPage(1) // reset page on dataset scope change
-        }
-      } catch {
-        if (!ignore) setAllRecords([])
+        setAllRecords(bucket)
+        setPage(1)
+      } catch (err) {
+        console.error("IndexingRecords loadAll error:", err)
+        setAllRecords([])
+        setLastError(err?.message || "Failed to load detections.")
       } finally {
-        if (!ignore) setLoading(false)
+        if (!soft) {
+          setLoading(false)
+        }
       }
-    }
-    loadAll()
-    return () => {
-      ignore = true
-    }
-  }, [wid, playbackMode, playbackSelectedVideoId])
+    },
+    [wid, playbackMode, playbackSelectedVideoId, videosById]
+  )
+
+  // Initial + scope-change load
+  useEffect(() => {
+    loadAll({ soft: false })
+  }, [loadAll])
 
   // reset page on filter change (auto-apply filters)
   useEffect(() => {
@@ -557,19 +763,11 @@ export default function IndexingRecords() {
   // filtered dataset (client-side)
   const filtered = useMemo(() => {
     return allRecords.filter((r) => {
-      // TYPE
       if (!matchesNullableExact(selected.type, r.type)) return false
-
-      // MAKE
       if (!matchesNullableExact(selected.make, r.make)) return false
-
-      // MODEL (supports "-" = NULL)
       if (!matchesNullableModel(selected.model, r.model)) return false
-
-      // COLORS (supports "-" = NULL)
       if (!matchesNullableColors(selected.color, r.colors)) return false
 
-      // PLATE substring
       const plate = r.plate_text || ""
       if (selected.plate && !toLower(plate).includes(toLower(selected.plate))) {
         return false
@@ -581,6 +779,7 @@ export default function IndexingRecords() {
 
   const total = filtered.length
   const totalPages = Math.max(1, Math.ceil(total / itemsPerPage))
+
   const pageItems = useMemo(() => {
     const start = (page - 1) * itemsPerPage
     return filtered.slice(start, start + itemsPerPage)
@@ -660,13 +859,36 @@ export default function IndexingRecords() {
           <p className="text-md">Indexing Records</p>
         </div>
 
-        <button className="text-sm px-4 py-2 gap-2 bg-orange-500 text-white rounded-md hover:bg-orange-400 flex flex-row items-center justify-center">
-          <Download size={14} />
-          Download CSV
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="text-xs px-3 py-2 border border-neutral-700 rounded-md hover:bg-neutral-800 flex items-center gap-1"
+            onClick={() => loadAll({ soft: false })}
+            disabled={loading}
+          >
+            {loading && <Loader2 className="h-3 w-3 animate-spin" />}
+            Refresh
+          </button>
+          <button className="text-sm px-4 py-2 gap-2 bg-orange-500 text-white rounded-md hover:bg-orange-400 flex flex-row items-center justify-center">
+            <Download size={14} />
+            Download CSV
+          </button>
+        </div>
       </div>
 
-      <div className="h-[1px] w-full border-[1px] border-neutral-800 mt-2 mb-8" />
+      <div className="h-[1px] w-full border-[1px] border-neutral-800 mt-2 mb-4" />
+
+      {/* Scope indicator */}
+      <div className="w-full mb-4 flex items-center justify-between text-xs text-neutral-400">
+        <span>
+          Scope:&nbsp;
+          {playbackMode === "video" && playbackSelectedVideoId
+            ? "Video scope — detections for selected playback video"
+            : "All videos in this workspace"}
+        </span>
+      </div>
+
+      <div className="h-[1px] w-full border-[1px] border-neutral-900 mb-4" />
 
       {/* Filters row (live filtering + Clear button) */}
       <div className="grid grid-cols-[repeat(5,minmax(0,1fr))_auto] gap-4 w-full mb-6">
@@ -706,7 +928,9 @@ export default function IndexingRecords() {
               <TableHead className="text-white">Make</TableHead>
               <TableHead className="text-white">Model</TableHead>
               <TableHead className="text-white">Plate Number</TableHead>
-              <TableHead className="text-neutral-700 text-center w-8">|</TableHead>
+              <TableHead className="text-neutral-700 text-center w-8">
+                |
+              </TableHead>
               <TableHead className="text-white">Timestamp</TableHead>
               <TableHead className="text-center text-white ml-2">
                 Actions
@@ -733,7 +957,9 @@ export default function IndexingRecords() {
                   colSpan={10}
                   className="text-xs text-neutral-400 py-8 text-center"
                 >
-                  No matching records.
+                  {!wid || wid === "default"
+                    ? "Select a workspace to view detections."
+                    : lastError || "No matching records."}
                 </TableCell>
               </TableRow>
             )}
@@ -753,25 +979,29 @@ export default function IndexingRecords() {
                   <TableCell>
                     <Dialog
                       open={detailsId === item.id}
-                      onOpenChange={(o) =>
-                        setDetailsId(o ? item.id : null)
-                      }
+                      onOpenChange={(o) => setDetailsId(o ? item.id : null)}
                     >
                       <DialogTrigger asChild>
                         <div
-                          className="h-16 w-24 border border-neutral-800 rounded-sm overflow-hidden cursor-pointer"
+                          className="h-16 w-24 border border-neutral-800 rounded-sm overflow-hidden cursor-pointer bg-neutral-900 flex items-center justify-center text-[10px] text-neutral-500"
                           title="View detection details"
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            className="h-full w-full object-cover"
-                            src={item.snapshot_url}
-                            alt=""
-                          />
+                          {item.snapshot_url ? (
+                            <img
+                              className="h-full w-full object-cover"
+                              src={item.snapshot_url}
+                              alt=""
+                            />
+                          ) : (
+                            <>View</>
+                          )}
                         </div>
                       </DialogTrigger>
                       <VideoAnalysisDetailsDialog
                         id={item.id}
+                        videoId={item.video_id}
+                        workspaceId={wid}
                         open={detailsId === item.id}
                       />
                     </Dialog>
@@ -782,9 +1012,7 @@ export default function IndexingRecords() {
                   </TableCell>
 
                   <TableCell className="text-xs">
-                    {String(
-                      (item.colors && item.colors[0]) || "-"
-                    ).toUpperCase()}
+                    {String((item.colors && item.colors[0]) || "-").toUpperCase()}
                   </TableCell>
 
                   <TableCell className="text-xs">
@@ -834,10 +1062,10 @@ export default function IndexingRecords() {
                     )}
                   </TableCell>
 
-                  {/* Actions: Add to timeline + Edit/Delete */}
+                  {/* Actions: Add to timeline + Edit */}
                   <TableCell className="text-center">
                     <div className="flex items-center justify-center gap-2">
-                      {/* + Add to timeline */}
+                      {/* Add to timeline */}
                       <Button
                         variant="ghost"
                         size="icon"
@@ -847,8 +1075,10 @@ export default function IndexingRecords() {
                           e.stopPropagation()
 
                           const vm = videosById[item.video_id] || null
-                          const tlItem =
-                            normalizeDetectionToTimelineItem(item, vm)
+                          const tlItem = normalizeDetectionToTimelineItem(
+                            item,
+                            vm
+                          )
 
                           const camId = toCamDisplayId(
                             item.display_id || item.id
@@ -865,7 +1095,7 @@ export default function IndexingRecords() {
                             return
                           }
 
-                          state.addToTimeline(wid, tlItem)
+                          addToTimeline(wid, tlItem)
 
                           toast("Added to Timeline", {
                             description: camId,
@@ -898,15 +1128,23 @@ export default function IndexingRecords() {
                       </Button>
                     </div>
 
-                    {/* Edit / Danger dialog for this row */}
+                    {/* Edit dialog for this row */}
                     <EditDangerDialog
                       item={item}
+                      workspaceId={wid}
+                      videoId={item.video_id}
                       open={manageId === item.id}
                       onOpenChange={(o) => setManageId(o ? item.id : null)}
                       onSaved={(next) => {
                         setAllRecords((prev) =>
                           prev.map((r) =>
-                            r.id === item.id ? { ...r, ...next } : r
+                            r.id === item.id
+                              ? normalizeVideoDetectionRow(next, {
+                                  videoId: r.video_id,
+                                  videoMeta: videosById[r.video_id] || null,
+                                  workspaceId: wid,
+                                })
+                              : r
                           )
                         )
                       }}

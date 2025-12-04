@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useState, Fragment } from "react";
+import { useParams } from "next/navigation";
 import {
   DialogContent,
   DialogHeader,
@@ -52,6 +53,12 @@ function Card({ title, children }) {
   );
 }
 
+/**
+ * VehicleColors
+ * - Designed to work well with ColorFBL[] from DetectionOut:
+ *   { base, finish?, lightness?, conf }
+ * - Still gracefully handles legacy/other shapes.
+ */
 function VehicleColors({ colors }) {
   const list = Array.isArray(colors)
     ? colors
@@ -86,6 +93,7 @@ function VehicleColors({ colors }) {
   };
 
   const rows = list.slice(0, 3);
+
   return (
     <div className="space-y-1">
       {rows.map((col, i) => {
@@ -93,13 +101,17 @@ function VehicleColors({ colors }) {
         const base = textify(col?.base);
         const lightness = textify(col?.lightness);
         const hex = textify(col?.hex);
+
         const chips = [finish, base, lightness].filter(Boolean);
         if (chips.length === 0) {
           if (hex) chips.push(hex);
-          else if (typeof col === "string" || typeof col === "number")
+          else if (typeof col === "string" || typeof col === "number") {
             chips.push(String(col));
+          }
         }
+
         const conf = col?.conf ?? col?.p ?? col?.confidence ?? null;
+
         return (
           <div
             key={i}
@@ -125,6 +137,11 @@ function VehicleColors({ colors }) {
   );
 }
 
+/**
+ * RuntimeMetrics
+ * - Expects normalized keys (latency_ms, gflops, memory_gb).
+ * - Shows memory in GB, aligned with DetectionOut (memoryGb in GB).
+ */
 function RuntimeMetrics({ v }) {
   if (!v) {
     return (
@@ -148,8 +165,7 @@ function RuntimeMetrics({ v }) {
         ? v.memory_usage
         : null;
   const hasMem = memGBRaw != null && !Number.isNaN(Number(memGBRaw));
-  const memMB = hasMem ? Number(memGBRaw) * 1024 : null;
-  const memText = hasMem ? `${memMB.toFixed(0)} MB` : "—";
+  const memText = hasMem ? `${Number(memGBRaw).toFixed(2)} GB` : "—";
 
   return (
     <div className="text-xs opacity-80 flex flex-wrap items-center justify-between gap-3">
@@ -166,6 +182,10 @@ function RuntimeMetrics({ v }) {
   );
 }
 
+/**
+ * TmmGrid
+ * - Uses normalized type/make/model + *_conf fields.
+ */
 function TmmGrid({ v }) {
   return (
     <div className="text-sm">
@@ -198,10 +218,15 @@ function TmmGrid({ v }) {
   );
 }
 
+/**
+ * PartsList
+ * - Renders part-level evidence: { name, conf }[].
+ */
 function PartsList({ parts }) {
   if (!Array.isArray(parts) || parts.length === 0) {
     return <div className="text-xs text-neutral-500">No parts.</div>;
   }
+
   return (
     <ul className="text-sm grid grid-cols-1 gap-1">
       {parts.map((p, i) => (
@@ -224,50 +249,274 @@ function fmtDateTime(str) {
   return d.toLocaleString();
 }
 
-export default function VideoAnalysisDetailsDialog({ id, open }) {
+/**
+ * normalizeDetectionView
+ *
+ * Normalizes DetectionOut into a stable view shape for the dialog.
+ * Supports:
+ * - New video-analysis DetectionOut (typeLabel, typeConf, plateText, colors: FBL[], assets.*)
+ * - Legacy image-analysis detections (type, type_conf, plate_text, snapshot_url, etc.)
+ *
+ * The goal is to provide a unified "view" object:
+ *   type, type_conf, make, make_conf, model, model_conf,
+ *   plate_text, plate_conf, colors, parts,
+ *   recorded_at, detected_at, detected_in_ms,
+ *   latency_ms, gflops, memory_gb,
+ *   snapshotUrl, plateUrl,
+ *   status, error_msg
+ */
+function normalizeDetectionView(raw) {
+  if (!raw) return null;
+
+  const type =
+    raw.typeLabel != null
+      ? raw.typeLabel
+      : raw.type != null
+        ? raw.type
+        : raw.type_label != null
+          ? raw.type_label
+          : "";
+  const typeConf =
+    raw.typeConf != null
+      ? raw.typeConf
+      : raw.type_conf != null
+        ? raw.type_conf
+        : null;
+
+  const make =
+    raw.makeLabel != null
+      ? raw.makeLabel
+      : raw.make != null
+        ? raw.make
+        : raw.make_label != null
+          ? raw.make_label
+          : "";
+  const makeConf =
+    raw.makeConf != null
+      ? raw.makeConf
+      : raw.make_conf != null
+        ? raw.make_conf
+        : null;
+
+  const model =
+    raw.modelLabel != null
+      ? raw.modelLabel
+      : raw.model != null
+        ? raw.model
+        : raw.model_label != null
+          ? raw.model_label
+          : "";
+  const modelConf =
+    raw.modelConf != null
+      ? raw.modelConf
+      : raw.model_conf != null
+        ? raw.model_conf
+        : null;
+
+  const plateText =
+    raw.plateText != null
+      ? raw.plateText
+      : raw.plate_text != null
+        ? raw.plate_text
+        : "";
+  const plateConf =
+    raw.plateConf != null
+      ? raw.plateConf
+      : raw.plate_conf != null
+        ? raw.plate_conf
+        : null;
+
+  const colors = Array.isArray(raw.colors) ? raw.colors : [];
+  const parts = Array.isArray(raw.parts) ? raw.parts : [];
+
+  const recordedAt =
+    raw.recordedAt != null ? raw.recordedAt : raw.recorded_at ?? null;
+  const detectedAt =
+    raw.detectedAt != null ? raw.detectedAt : raw.detected_at ?? null;
+  const detectedInMs =
+    raw.detectedInMs != null ? raw.detectedInMs : raw.detected_in_ms ?? null;
+
+  const latencyMs =
+    raw.latencyMs != null ? raw.latencyMs : raw.latency_ms ?? null;
+  const gflops = raw.gflops != null ? raw.gflops : null;
+  const memoryGb =
+    raw.memoryGb != null
+      ? raw.memoryGb
+      : raw.memory_gb != null
+        ? raw.memory_gb
+        : null;
+
+  const snapshotUrl =
+    (raw.assets && raw.assets.annotatedUrl) ||
+    (raw.assets && raw.assets.vehicleUrl) ||
+    raw.snapshot_url ||
+    raw.image ||
+    null;
+
+  const plateUrl =
+    (raw.assets && raw.assets.plateUrl) ||
+    raw.plate_url ||
+    raw.plate_image ||
+    null;
+
+  const status = raw.status != null ? raw.status : "processed";
+  const errorMsg =
+    raw.error_msg != null
+      ? raw.error_msg
+      : raw.errorMsg != null
+        ? raw.errorMsg
+        : null;
+
+  return {
+    ...raw,
+    type,
+    type_conf: typeConf,
+    make,
+    make_conf: makeConf,
+    model,
+    model_conf: modelConf,
+    plate_text: plateText,
+    plate_conf: plateConf,
+    colors,
+    parts,
+    recorded_at: recordedAt,
+    detected_at: detectedAt,
+    detected_in_ms: detectedInMs,
+    latency_ms: latencyMs,
+    gflops,
+    memory_gb: memoryGb,
+    // keep memory_usage as-is for legacy; metrics helper prefers memory_gb if present
+    memory_usage: raw.memory_usage != null ? raw.memory_usage : null,
+    snapshotUrl,
+    plateUrl,
+    status,
+    error_msg: errorMsg,
+  };
+}
+
+export default function VideoAnalysisDetailsDialog({
+  id,
+  videoId,
+  workspaceId,
+  open,
+}) {
+  const params = useParams();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   const [vizUrl, setVizUrl] = useState(null);
   const [vizLoading, setVizLoading] = useState(false);
 
   useEffect(() => {
     if (!open || !id) return;
+
     setData(null);
     setVizUrl(null);
+    setError(null);
     setLoading(true);
+
+    let cancelled = false;
+
     (async () => {
       try {
-        const r = await fetch(`/api/proxy/detections/${id}`, { cache: "no-store" });
-        if (!r.ok) throw new Error("Failed to load detection");
+        const routeWid =
+          workspaceId && typeof workspaceId === "string"
+            ? workspaceId
+            : params && typeof params.workspaceId === "string"
+              ? params.workspaceId
+              : null;
+
+        let url;
+        // Preferred path for video-analysis detections
+        if (routeWid && videoId) {
+          url = `/api/workspaces/${routeWid}/videos/${videoId}/detections/${id}?presign=1&ttl=900`;
+        } else {
+          // Backwards-compatible fallback for legacy image-analysis
+          url = `/api/proxy/detections/${id}`;
+        }
+
+        const r = await fetch(url, { cache: "no-store" });
+        if (!r.ok) {
+          throw new Error("Failed to load detection details");
+        }
         const j = await r.json();
-        setData(j);
-      } catch {
-        setData(null);
+        if (!cancelled) {
+          setData(j);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(
+            e && e.message
+              ? e.message
+              : "Failed to load detection details."
+          );
+          setData(null);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     })();
-  }, [open, id]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, id, videoId, workspaceId, params]);
+
+  const view = data ? normalizeDetectionView(data) : null;
+  const snapshotUrl = view?.snapshotUrl || null;
+  const plateUrl = view?.plateUrl || null;
 
   const requestVisualization = async () => {
     if (!id) return;
+
     setVizLoading(true);
+
     try {
-      const r = await fetch(`/api/proxy/detections/${id}/evidence`, {
-        method: "POST",
-      });
-      const j = await r.json().catch(() => ({}));
-      setVizUrl(j?.image_url || data?.snapshot_url || null);
+      const routeWid =
+        workspaceId && typeof workspaceId === "string"
+          ? workspaceId
+          : params && typeof params.workspaceId === "string"
+            ? params.workspaceId
+            : null;
+
+      let payload = null;
+
+      // Preferred future path (video-analysis evidence), if/when backend exists
+      if (routeWid && videoId) {
+        const r = await fetch(
+          `/api/workspaces/${routeWid}/videos/${videoId}/detections/${id}/evidence`,
+          { method: "POST" }
+        );
+        if (r.ok) {
+          payload = await r.json().catch(() => ({}));
+        }
+      }
+
+      // Fallback to legacy image-analysis evidence route
+      if (!payload) {
+        const r = await fetch(`/api/proxy/detections/${id}/evidence`, {
+          method: "POST",
+        });
+        if (r.ok) {
+          payload = await r.json().catch(() => ({}));
+        }
+      }
+
+      const imgUrl =
+        (payload && (payload.image_url || payload.imageUrl)) ||
+        snapshotUrl ||
+        null;
+
+      setVizUrl(imgUrl);
     } catch {
-      setVizUrl(data?.snapshot_url || null);
+      setVizUrl(snapshotUrl || null);
     } finally {
       setVizLoading(false);
     }
   };
-
-  const snapshotUrl = data?.snapshot_url || data?.image || null;
-  const plateUrl = data?.plate_url || data?.plate_image || null;
 
   return (
     <DialogContent className="sm:max-w-[780px] max-h-[85vh] overflow-y-auto z-[70]">
@@ -278,12 +527,14 @@ export default function VideoAnalysisDetailsDialog({ id, open }) {
         </DialogDescription>
       </DialogHeader>
 
-      {!data ? (
+      {!view ? (
         <div className="py-16 flex items-center justify-center text-sm text-neutral-400">
           {loading ? (
             <Fragment>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading…
             </Fragment>
+          ) : error ? (
+            <span>{error}</span>
           ) : (
             "No data"
           )}
@@ -356,20 +607,20 @@ export default function VideoAnalysisDetailsDialog({ id, open }) {
 
             <div className="space-y-3">
               <Card title="Type / Make / Model">
-                <TmmGrid v={data} />
+                <TmmGrid v={view} />
               </Card>
 
               <Card title="Confidence — Type / Make / Model">
-                <VideoConfidenceBar variant={data} />
+                <VideoConfidenceBar variant={view} />
               </Card>
 
               <Card title="Status & Runtime">
                 <Field label="Status">
                   <Badge variant="secondary">
-                    {data.status || "processed"}
+                    {view.status || "processed"}
                   </Badge>
                 </Field>
-                <RuntimeMetrics v={data} />
+                <RuntimeMetrics v={view} />
               </Card>
             </div>
           </div>
@@ -379,9 +630,9 @@ export default function VideoAnalysisDetailsDialog({ id, open }) {
             <Card title="License Plate">
               <Field label="Plate Text" mono>
                 <div className="flex items-baseline">
-                  <span>{data.plate_text || "—"}</span>
+                  <span>{view.plate_text || "—"}</span>
                   <span className="text-[11px] text-neutral-500 ml-2">
-                    {pct(data.plate_conf)}
+                    {pct(view.plate_conf)}
                   </span>
                 </div>
               </Field>
@@ -402,7 +653,7 @@ export default function VideoAnalysisDetailsDialog({ id, open }) {
             </Card>
 
             <Card title="Vehicle Colors">
-              <VehicleColors colors={data.colors} />
+              <VehicleColors colors={view.colors} />
             </Card>
           </div>
 
@@ -410,24 +661,28 @@ export default function VideoAnalysisDetailsDialog({ id, open }) {
           <Card title="Timing">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <Field label="Recorded At">
-                <span suppressHydrationWarning>{fmtDateTime(data.recorded_at)}</span>
+                <span suppressHydrationWarning>
+                  {fmtDateTime(view.recorded_at)}
+                </span>
               </Field>
               <Field label="Detected At">
-                <span suppressHydrationWarning>{fmtDateTime(data.detected_at)}</span>
+                <span suppressHydrationWarning>
+                  {fmtDateTime(view.detected_at)}
+                </span>
               </Field>
               <Field label="Detected In (ms)" mono>
-                {data.detected_in_ms != null ? data.detected_in_ms : "—"}
+                {view.detected_in_ms != null ? view.detected_in_ms : "—"}
               </Field>
             </div>
           </Card>
 
           {/* PARTS */}
           <Card title="Detected Parts">
-            <PartsList parts={data.parts} />
+            <PartsList parts={view.parts} />
           </Card>
 
-          {data.error_msg && (
-            <div className="text-xs text-red-500">{data.error_msg}</div>
+          {view.error_msg && (
+            <div className="text-xs text-red-500">{view.error_msg}</div>
           )}
         </div>
       )}
