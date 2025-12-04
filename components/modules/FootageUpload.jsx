@@ -55,6 +55,7 @@ import { FileUpload } from "@/components/ui/file-upload"
 
 import { useParams } from "next/navigation"
 import { useAppStore } from "@/lib/store"
+import { vaPresign, vaCommit, vaEnqueue, putToS3WithProgress } from "@/lib/videoAnalysis"
 
 /* ---------------- helpers ---------------- */
 
@@ -182,9 +183,11 @@ async function deleteVideo(wid, vid, confirmCameraCode) {
 }
 
 async function enqueueVideo(wid, vid) {
-  const r = await fetch(`/api/workspaces/${wid}/videos/${vid}/enqueue`, { method: "POST" })
-  if (!r.ok) throw new Error(await r.text())
-  return r.json()
+  // Delegate to canonical helper, which:
+  // - Sends JSON body { variant: "cmt" }
+  // - Sets content-type
+  // - Uses unified error handling
+  return vaEnqueue(wid, vid, { variant: "cmt" })
 }
 
 // Video progress (counts + percent) for a given variant (default "cmt")
@@ -193,8 +196,31 @@ async function getVideoProgress(wid, vid, variant = "cmt") {
     `/api/workspaces/${wid}/videos/${vid}/progress?variant=${encodeURIComponent(variant)}`,
     { cache: "no-store" }
   )
-  if (!r.ok) throw new Error(await r.text())
-  return r.json()
+
+  const text = await r.text()
+  if (!r.ok) {
+    // Soft 404: treat "Video analysis run not found" as "not started yet"
+    if (r.status === 404) {
+      try {
+        const data = text ? JSON.parse(text) : null
+        if (data && data.detail === "Video analysis run not found") {
+          return null
+        }
+      } catch {
+        // Ignore parse errors and still treat as "no run yet"
+      }
+      return null
+    }
+
+    // Other statuses: surface as real errors
+    throw new Error(text || `progress ${r.status}`)
+  }
+
+  try {
+    return text ? JSON.parse(text) : null
+  } catch {
+    throw new Error("Invalid JSON from progress endpoint")
+  }
 }
 
 // PUT the file to S3 using presigned URL (must match content-type used for presign)
@@ -344,28 +370,27 @@ export default function FootageUpload() {
 
     setUploading(true)
     try {
-      // 1) presign → /videos/presign (VideoPresignIn)
-      const presignRes = await fetch(`/api/workspaces/${wid}/videos/presign`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: file.name,
-          content_type: file.type || "video/mp4",
-          file_size_bytes: file.size,
-          camera_code, // normalized above
-          frame_stride: 3,
-          recorded_at: recorded_at,
-          workspace_code: currentWorkspace?.code || null,
-        }),
+      // 1) presign → /videos/presign (VideoPresignIn) via shared helper
+      const presigned = await vaPresign(wid, {
+        filename: file.name,
+        content_type: file.type || "video/mp4",
+        file_size_bytes: file.size,
+        camera_code, // normalized above
+        frame_stride: 3,
+        recorded_at: recorded_at,
+        workspace_code: currentWorkspace?.code || null,
       })
-      if (!presignRes.ok) throw new Error(await presignRes.text())
-      const presigned = await presignRes.json()
+
       const video_id =
         presigned?.videoId ?? presigned?.video_id ?? presigned?.id ?? null
       const key =
         presigned?.s3KeyRaw ?? presigned?.s3_key_raw ?? presigned?.key ?? null
       const putUrl =
-        presigned?.presignedUrl ?? presigned?.url ?? presigned?.put_url ?? null
+        presigned?.presignedUrl ??
+        presigned?.url ??
+        presigned?.put_url ??
+        null
+
       if (!video_id || !key || !putUrl) {
         throw new Error(
           "Presign missing required fields (videoId/s3KeyRaw/presignedUrl)"
@@ -373,11 +398,13 @@ export default function FootageUpload() {
       }
       console.log("[videos:create] presigned", { video_id, key })
 
-      // 2) upload
-      await putToS3(putUrl, file)
+      // 2) upload with progress via shared helper
+      await putToS3WithProgress(putUrl, file, (_percent) => {
+        // Percent callback is available for wiring to a progress bar if desired.
+      })
 
-      // 3) commit — backend requires JSON body (no query params)
-      const commitBody = {
+      // 3) commit — aligned with VideoCommitIn, via shared helper
+      const commitRes = await vaCommit(wid, {
         videoId: video_id,
         s3KeyRaw: key,
         fileName: file_name,
@@ -388,13 +415,9 @@ export default function FootageUpload() {
         workspaceCode: currentWorkspace?.code || null,
         fileSizeBytes: file.size,
         contentType: file.type || "video/mp4",
-      }
-      const commitRes = await fetch(`/api/workspaces/${wid}/videos/commit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(commitBody),
       })
-      if (!commitRes.ok) throw new Error(await commitRes.text())
+
+      console.log("[videos:create] committed", commitRes)
 
       // 4) backend wrote/updated the row on /videos/commit → refresh list
       await refresh()
@@ -530,7 +553,7 @@ export default function FootageUpload() {
                     }}
                   />
                 </div>
-                <p className="text-xs text-neutral-400">Only one MP4 file is allowed. Drag & drop is supported.</p>
+                <p className="text-xs text-neutral-400">Only one MP4 file is allowed. Drag and drop is supported.</p>
               </div>
 
               <DialogFooter>
@@ -549,7 +572,7 @@ export default function FootageUpload() {
                     uploading
                   }
                 >
-                  {uploading ? "Uploading..." : "Save & Upload"}
+                  {uploading ? "Uploading..." : "Save and Upload"}
                 </Button>
               </DialogFooter>
             </form>
@@ -653,6 +676,12 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
       try {
         const j = await getVideoProgress(wid, v.id)
         if (cancelled) return
+
+        // No run yet (404 soft) → nothing to update
+        if (!j) {
+          return
+        }
+
         setProgress({
           status: j.status,
           percent: j.percent,
@@ -662,7 +691,10 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
           processedErr: j.processedErr,
         })
 
-        if ((j.status === "done" || j.status === "error") && typeof refreshAll === "function") {
+        if (
+          (j.status === "done" || j.status === "error") &&
+          typeof refreshAll === "function"
+        ) {
           await refreshAll()
         }
       } catch (e) {
@@ -718,10 +750,10 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
     }
     try {
       setSaving(true)
-      // Backend PATCH accepts only cameraLabel and recordedAt (camelCase)
+      // Backend PATCH expects snake_case: camera_label, recorded_at
       const payload = {
-        cameraLabel: (cameraLabel || "").trim() || null,
-        recordedAt: localDateTimeToISO(recordedAtLocal) || null,
+        camera_label: (cameraLabel || "").trim() || null,
+        recorded_at: localDateTimeToISO(recordedAtLocal) || null,
       }
       console.log("[videos:patch] →", { wid, vid: v.id, payload })
       const updated = await patchVideo(wid, v.id, payload)
@@ -804,7 +836,7 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
               <div className="grid gap-2">
                 <Label>Camera Code</Label>
                 <Input value={cameraCode} disabled />
-                <p className="text-xs text-neutral-500">Immutable. Set during upload/commit.</p>
+                <p className="text-xs text-neutral-500">Immutable. Set during upload and commit.</p>
               </div>
 
               <div className="grid gap-2">
