@@ -310,19 +310,25 @@ function normalizeVideoDetectionRow(det, ctx) {
 
   const plateText = det.plateText || det.plate_text || ""
 
-  const snapshotUrlFromAssets =
-    assets.vehicleUrl ||
-    assets.annotatedUrl ||
-    assets.vehicle_url ||
-    assets.annotated_url ||
-    null
-
+  // Snapshot / plate URLs (aligned with VideoAnalysisDetailsDialog.normalizeDetectionView)
   const snapshotUrl =
-    det.snapshot_url ||
+    assets.annotatedUrl ||
+    assets.annotated_url ||
+    assets.vehicleUrl ||
+    assets.vehicle_url ||
     det.snapshotUrl ||
+    det.snapshot_url ||
     det.image ||
     det.snapshot ||
-    snapshotUrlFromAssets
+    null
+
+  const plateUrl =
+    assets.plateUrl ||
+    assets.plate_url ||
+    det.plateUrl ||
+    det.plate_url ||
+    det.plate_image ||
+    null
 
   return {
     id: det.id,
@@ -336,7 +342,7 @@ function normalizeVideoDetectionRow(det, ctx) {
     display_id: displayId,
 
     snapshot_url: snapshotUrl,
-    plate_url: assets.plateUrl || null,
+    plate_url: plateUrl,
 
     type: typeLabel,
     type_conf: typeConf,
@@ -756,7 +762,7 @@ export default function IndexingRecords() {
         // Video-scoped: detections for the selected video only
         if (playbackMode === "video" && playbackSelectedVideoId) {
           const res = await fetch(
-            `/api/workspaces/${wid}/videos/${playbackSelectedVideoId}/detections?variant=cmt`,
+            `/api/workspaces/${wid}/videos/${playbackSelectedVideoId}/detections?variant=cmt&presign=1&ttl=900`,
             { cache: "no-store" }
           )
           if (res.ok) {
@@ -781,7 +787,7 @@ export default function IndexingRecords() {
         } else {
           // Workspace-scoped: detections for all videos via workspace endpoint
           const res = await fetch(
-            `/api/workspaces/${wid}/detections?variant=cmt`,
+            `/api/workspaces/${wid}/detections?variant=cmt&presign=1&ttl=900`,
             { cache: "no-store" }
           )
           if (!res.ok) {

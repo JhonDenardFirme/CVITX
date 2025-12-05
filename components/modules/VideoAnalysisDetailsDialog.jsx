@@ -517,7 +517,7 @@ export default function VideoAnalysisDetailsDialog({
                 )}
               </div>
 
-              <div className="mt-3 grid grid-cols-1 md:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] gap-3">
+              <div className="mt-4 grid grid-row-1 md:grid-row-[minmax(0,1.1fr)_minmax(0,0.9fr)] gap-3">
                 <div>
                   <Field label="Plate Text" mono>
                     <div className="flex items-baseline">
