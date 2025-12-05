@@ -310,6 +310,20 @@ function normalizeVideoDetectionRow(det, ctx) {
 
   const plateText = det.plateText || det.plate_text || ""
 
+  const snapshotUrlFromAssets =
+    assets.vehicleUrl ||
+    assets.annotatedUrl ||
+    assets.vehicle_url ||
+    assets.annotated_url ||
+    null
+
+  const snapshotUrl =
+    det.snapshot_url ||
+    det.snapshotUrl ||
+    det.image ||
+    det.snapshot ||
+    snapshotUrlFromAssets
+
   return {
     id: det.id,
     detection_id: det.id,
@@ -321,10 +335,7 @@ function normalizeVideoDetectionRow(det, ctx) {
 
     display_id: displayId,
 
-    snapshot_url:
-      assets.vehicleUrl ||
-      assets.annotatedUrl ||
-      null,
+    snapshot_url: snapshotUrl,
     plate_url: assets.plateUrl || null,
 
     type: typeLabel,
@@ -382,7 +393,9 @@ function EditDangerDialog({
 
   const doSave = async () => {
     if (!workspaceId || !videoId) {
-      alert("Missing workspace or video context for save.")
+      toast("Cannot save detection", {
+        description: "Missing workspace or video context for save.",
+      })
       return
     }
 
@@ -434,24 +447,77 @@ function EditDangerDialog({
       if (next) {
         onSaved(next)
       }
+
+      toast("Detection updated", {
+        description: confirmTarget || String(item.id || ""),
+      })
+
       onOpenChange(false)
     } catch (err) {
       console.error("EditDangerDialog save failed:", err)
-      alert(err.message || "Save failed.")
+      const message =
+        err && typeof err.message === "string" && err.message.length > 0
+          ? err.message
+          : "Save failed."
+      toast("Save failed", {
+        description: message,
+      })
     } finally {
       setSaving(false)
     }
   }
 
   const doDelete = async () => {
+    if (!workspaceId || !videoId) {
+      toast("Cannot delete detection", {
+        description: "Missing workspace or video context for delete.",
+      })
+      return
+    }
+
     setDeleting(true)
     try {
-      alert(
-        "Delete is not yet supported for video detections. This action has no effect until the backend delete or soft-delete endpoint is implemented."
+      const r = await fetch(
+        `/api/workspaces/${workspaceId}/videos/${videoId}/detections/${item.id}`,
+        {
+          method: "DELETE",
+        }
       )
+
+      const text = await r.text()
+      if (!r.ok) {
+        let detail = "Delete failed."
+        try {
+          const data = text ? JSON.parse(text) : null
+          detail =
+            data?.error?.message ||
+            data?.message ||
+            data?.detail ||
+            detail
+        } catch {
+          // ignore parse errors
+        }
+        throw new Error(detail)
+      }
+
       if (typeof onDeleted === "function") {
         onDeleted()
       }
+
+      toast("Detection deleted", {
+        description: confirmTarget || String(item.id || ""),
+      })
+
+      onOpenChange(false)
+    } catch (err) {
+      console.error("EditDangerDialog delete failed:", err)
+      const message =
+        err && typeof err.message === "string" && err.message.length > 0
+          ? err.message
+          : "Delete failed."
+      toast("Delete failed", {
+        description: message,
+      })
     } finally {
       setDeleting(false)
     }
@@ -463,8 +529,9 @@ function EditDangerDialog({
         <DialogHeader>
           <DialogTitle>Edit Detection</DialogTitle>
           <DialogDescription>
-            Update basic attributes. Delete is not yet supported for video
-            detections.
+            Update basic attributes for this detection. Deleting a detection
+            will remove this row from the indexing table and may be
+            irreversible.
           </DialogDescription>
         </DialogHeader>
 
@@ -543,24 +610,27 @@ function EditDangerDialog({
         <div className="mt-6 border-t border-neutral-800 pt-4">
           <p className="text-sm font-medium text-red-400 mb-2">Danger Zone</p>
           <p className="text-xs text-neutral-400 mb-3">
-            Delete for video detections is not wired to the backend yet. This
-            button is intentionally disabled until the delete or soft-delete
-            endpoint is implemented. When enabled, you will need to type{" "}
+            To permanently delete this detection, type{" "}
             <span className="font-semibold text-neutral-200">
               {confirmTarget || "(unknown ID)"}
             </span>{" "}
-            to confirm.
+            in the box below and press Delete. This will remove the detection
+            from the indexing table and cannot be undone from this screen.
           </p>
           <div className="flex items-center gap-2">
             <Input
               placeholder={`${confirmTarget}`}
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
-              disabled
+              disabled={deleting}
             />
             <Button
               variant="destructive"
-              disabled
+              disabled={
+                deleting ||
+                !confirm ||
+                (confirmTarget && confirm !== confirmTarget)
+              }
               onClick={doDelete}
             >
               {deleting ? "Deleting…" : "Delete"}

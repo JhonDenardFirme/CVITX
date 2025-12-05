@@ -13,12 +13,12 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import VideoConfidenceBar from "./VideoConfidenceBar";
 
 const FRAME =
-  "w-full h-64 md:h-72 rounded-lg overflow-hidden border border-neutral-800 bg-black";
+  "w-full h-72 md:h-80 rounded-lg overflow-hidden border border-neutral-800 bg-black";
 const FRAME_INNER_CENTER = "w-full h-full flex items-center justify-center";
 const IMG = "h-full w-full object-contain";
 const PLATE_FRAME =
@@ -228,13 +228,13 @@ function PartsList({ parts }) {
   }
 
   return (
-    <ul className="text-sm grid grid-cols-1 gap-1">
+    <ul className="grid grid-cols-1 gap-1">
       {parts.map((p, i) => (
         <li
           key={`${p?.name || "part"}-${i}`}
           className="flex items-center justify-between border-b border-neutral-800 py-1"
         >
-          <span>{p?.name || "Part"}</span>
+          <span className="text-sm">{p?.name || "Part"}</span>
           <span className="text-xs text-neutral-500">{pct(p?.conf)}</span>
         </li>
       ))}
@@ -346,15 +346,23 @@ function normalizeDetectionView(raw) {
         ? raw.memory_gb
         : null;
 
+  const assets = raw.assets || {};
+
   const snapshotUrl =
-    (raw.assets && raw.assets.annotatedUrl) ||
-    (raw.assets && raw.assets.vehicleUrl) ||
+    assets.annotatedUrl ||
+    assets.annotated_url ||
+    assets.vehicleUrl ||
+    assets.vehicle_url ||
+    raw.snapshotUrl ||
     raw.snapshot_url ||
     raw.image ||
+    raw.snapshot ||
     null;
 
   const plateUrl =
-    (raw.assets && raw.assets.plateUrl) ||
+    assets.plateUrl ||
+    assets.plate_url ||
+    raw.plateUrl ||
     raw.plate_url ||
     raw.plate_image ||
     null;
@@ -405,14 +413,10 @@ export default function VideoAnalysisDetailsDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const [vizUrl, setVizUrl] = useState(null);
-  const [vizLoading, setVizLoading] = useState(false);
-
   useEffect(() => {
     if (!open || !id) return;
 
     setData(null);
-    setVizUrl(null);
     setError(null);
     setLoading(true);
 
@@ -469,61 +473,13 @@ export default function VideoAnalysisDetailsDialog({
   const snapshotUrl = view?.snapshotUrl || null;
   const plateUrl = view?.plateUrl || null;
 
-  const requestVisualization = async () => {
-    if (!id) return;
-
-    setVizLoading(true);
-
-    try {
-      const routeWid =
-        workspaceId && typeof workspaceId === "string"
-          ? workspaceId
-          : params && typeof params.workspaceId === "string"
-            ? params.workspaceId
-            : null;
-
-      let payload = null;
-
-      // Preferred future path (video-analysis evidence), if/when backend exists
-      if (routeWid && videoId) {
-        const r = await fetch(
-          `/api/workspaces/${routeWid}/videos/${videoId}/detections/${id}/evidence`,
-          { method: "POST" }
-        );
-        if (r.ok) {
-          payload = await r.json().catch(() => ({}));
-        }
-      }
-
-      // Fallback to legacy image-analysis evidence route
-      if (!payload) {
-        const r = await fetch(`/api/proxy/detections/${id}/evidence`, {
-          method: "POST",
-        });
-        if (r.ok) {
-          payload = await r.json().catch(() => ({}));
-        }
-      }
-
-      const imgUrl =
-        (payload && (payload.image_url || payload.imageUrl)) ||
-        snapshotUrl ||
-        null;
-
-      setVizUrl(imgUrl);
-    } catch {
-      setVizUrl(snapshotUrl || null);
-    } finally {
-      setVizLoading(false);
-    }
-  };
-
   return (
     <DialogContent className="sm:max-w-[780px] max-h-[85vh] overflow-y-auto z-[70]">
       <DialogHeader className="pb-2">
         <DialogTitle className="text-lg">Detection Details</DialogTitle>
         <DialogDescription>
-          Review CMT video analysis attributes, annotated evidence, and parts.
+          Review video analysis attributes, plate details, colors, runtime
+          metrics, and parts.
         </DialogDescription>
       </DialogHeader>
 
@@ -541,9 +497,9 @@ export default function VideoAnalysisDetailsDialog({
         </div>
       ) : (
         <div className="space-y-4">
-          {/* TOP: Snapshot + evidence + basic attrs */}
-          <div className="grid grid-cols-1 md:grid-cols-[1.3fr_1fr] gap-4">
-            <Card title="Vehicle Snapshot & AI Detection Report">
+          {/* TOP: Snapshot + plate + basic attrs */}
+          <div className="grid grid-cols-1 md:grid-cols-[1.5fr_1fr] gap-4">
+            <Card title="Vehicle Snapshot & Plate Details">
               <div className={FRAME}>
                 {snapshotUrl ? (
                   <img
@@ -561,45 +517,29 @@ export default function VideoAnalysisDetailsDialog({
                 )}
               </div>
 
-              <div className="mt-3 space-y-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={requestVisualization}
-                  disabled={vizLoading}
-                  className="h-8 w-fit px-3 border-dashed border-neutral-700 hover:bg-neutral-900"
-                >
-                  {vizLoading ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Sparkles className="mr-2 h-4 w-4" />
-                  )}
-                  {vizLoading ? "Processing…" : "Request AI Detection Report"}
-                </Button>
-
-                <div
-                  className={cn(
-                    "w-full border border-dashed border-neutral-700 rounded-lg bg-neutral-950 flex items-center justify-center overflow-hidden transition-all",
-                    vizUrl ? "h-auto p-2 mt-2" : "h-24 mt-1"
-                  )}
-                >
-                  {vizUrl ? (
-                    <div className="max-w-full">
-                      <img
-                        src={vizUrl}
-                        alt="Detection Evidence"
-                        className="mx-auto"
-                        style={{
-                          width: "min(720px, 100%)",
-                          height: "auto",
-                          aspectRatio: "1 / 1",
-                        }}
-                      />
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] gap-3">
+                <div>
+                  <Field label="Plate Text" mono>
+                    <div className="flex items-baseline">
+                      <span>{view.plate_text || "—"}</span>
+                      <span className="text-[11px] text-neutral-500 ml-2">
+                        {pct(view.plate_conf)}
+                      </span>
                     </div>
+                  </Field>
+                </div>
+                <div className={PLATE_FRAME}>
+                  {plateUrl ? (
+                    <img
+                      src={plateUrl}
+                      alt="Plate crop"
+                      className={PLATE_IMG}
+                      loading="eager"
+                    />
                   ) : (
-                    <span className="text-[11px] text-neutral-500">
-                      Will expand to show AI detection visualization when ready.
-                    </span>
+                    <div className="w-full h-full flex items-center justify-center text-xs text-neutral-600">
+                      No plate crop
+                    </div>
                   )}
                 </div>
               </div>
@@ -625,33 +565,8 @@ export default function VideoAnalysisDetailsDialog({
             </div>
           </div>
 
-          {/* MIDDLE: Plate + Colors */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card title="License Plate">
-              <Field label="Plate Text" mono>
-                <div className="flex items-baseline">
-                  <span>{view.plate_text || "—"}</span>
-                  <span className="text-[11px] text-neutral-500 ml-2">
-                    {pct(view.plate_conf)}
-                  </span>
-                </div>
-              </Field>
-              <div className={`${PLATE_FRAME} mt-2`}>
-                {plateUrl ? (
-                  <img
-                    src={plateUrl}
-                    alt="Plate crop"
-                    className={PLATE_IMG}
-                    loading="eager"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-xs text-neutral-600">
-                    No plate crop
-                  </div>
-                )}
-              </div>
-            </Card>
-
+          {/* MIDDLE: Colors */}
+          <div className="grid grid-cols-1 gap-4">
             <Card title="Vehicle Colors">
               <VehicleColors colors={view.colors} />
             </Card>
