@@ -14,7 +14,9 @@ import { authHeaders, buildBackendUrl, getWid, passThru } from "../_utils";
  */
 export async function GET(req, ctx) {
   try {
-    const wid = await getWid(ctx.params);
+    // Next 16: ctx.params can be a Promise; unwrap it once.
+    const params = await ctx.params;
+    const wid = await getWid(params);
     const { search } = new URL(req.url);
     const url = buildBackendUrl(`/workspaces/${wid}/videos${search || ""}`);
     const headers = await authHeaders();

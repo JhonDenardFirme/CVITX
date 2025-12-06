@@ -1,4 +1,3 @@
-
 // app/api/workspaces/[workspaceId]/videos/[videoId]/enqueue/route.js
 import { authHeaders, buildBackendUrl, getWid, passThru } from "../../../_utils";
 
@@ -10,8 +9,10 @@ import { authHeaders, buildBackendUrl, getWid, passThru } from "../../../_utils"
  */
 export async function POST(req, ctx) {
   try {
-    const wid = await getWid(ctx.params);
-    const { videoId } = ctx.params;
+    // Next 16: ctx.params can be a Promise; unwrap it once.
+    const params = await ctx.params;
+    const wid = await getWid(params);
+    const { videoId } = params;
     const url = buildBackendUrl(`/workspaces/${wid}/videos/${videoId}/enqueue`);
     const headers = { ...(await authHeaders()), "content-type": "application/json" };
     const body = await req.text();

@@ -9,10 +9,14 @@ import { authHeaders, buildBackendUrl, getWid, passThru } from "../../../_utils"
  */
 export async function GET(req, ctx) {
   try {
-    const wid = await getWid(ctx.params);
-    const { videoId } = ctx.params;
+    // Next 16: ctx.params can be a Promise; unwrap it once.
+    const params = await ctx.params;
+    const wid = await getWid(params);
+    const { videoId } = params;
     const { search } = new URL(req.url);
-    const url = buildBackendUrl(`/workspaces/${wid}/videos/${videoId}/analyses${search || ""}`);
+    const url = buildBackendUrl(
+      `/workspaces/${wid}/videos/${videoId}/analyses${search || ""}`
+    );
     const headers = await authHeaders();
     const r = await fetch(url, { headers, cache: "no-store" });
     return passThru(r);

@@ -11,10 +11,14 @@ import { authHeaders, buildBackendUrl, getWid, passThru } from "../../_utils";
  */
 export async function GET(req, ctx) {
   try {
-    const wid = await getWid(ctx.params);
-    const { videoId } = ctx.params;
+    // Next 16: ctx.params can be a Promise; unwrap it once.
+    const params = await ctx.params;
+    const wid = await getWid(params);
+    const { videoId } = params;
     const { search } = new URL(req.url);
-    const url = buildBackendUrl(`/workspaces/${wid}/videos/${videoId}${search || ""}`);
+    const url = buildBackendUrl(
+      `/workspaces/${wid}/videos/${videoId}${search || ""}`
+    );
     const headers = await authHeaders();
     const r = await fetch(url, { headers, cache: "no-store" });
     return passThru(r);
@@ -26,8 +30,10 @@ export async function GET(req, ctx) {
 
 export async function PATCH(req, ctx) {
   try {
-    const wid = await getWid(ctx.params);
-    const { videoId } = ctx.params;
+    // Next 16: ctx.params can be a Promise; unwrap it once.
+    const params = await ctx.params;
+    const wid = await getWid(params);
+    const { videoId } = params;
     const url = buildBackendUrl(`/workspaces/${wid}/videos/${videoId}`);
     const headers = { ...(await authHeaders()), "content-type": "application/json" };
     const body = await req.text();
@@ -41,8 +47,10 @@ export async function PATCH(req, ctx) {
 
 export async function DELETE(req, ctx) {
   try {
-    const wid = await getWid(ctx.params);
-    const { videoId } = ctx.params;
+    // Next 16: ctx.params can be a Promise; unwrap it once.
+    const params = await ctx.params;
+    const wid = await getWid(params);
+    const { videoId } = params;
     const url = buildBackendUrl(`/workspaces/${wid}/videos/${videoId}`);
     const headers = { ...(await authHeaders()), "content-type": "application/json" };
     const body = await req.text(); // expect { confirmCameraCode: "..." }
