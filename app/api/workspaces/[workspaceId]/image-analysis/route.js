@@ -3,7 +3,9 @@ import { authHeaders, buildBackendUrl, getWid, passThru } from "../_utils";
 
 export async function GET(req, ctx) {
   try {
-    const wid = await getWid(ctx.params);
+    // Next 15/16: ctx.params can be a Promise; unwrap it once.
+    const params = await ctx.params;
+    const wid = await getWid(params);
     const { search } = new URL(req.url); // preserve ?limit=&offset= (and future filters)
     const url = buildBackendUrl(`/workspaces/${wid}/image-analyses${search || ""}`);
     const h = await authHeaders();

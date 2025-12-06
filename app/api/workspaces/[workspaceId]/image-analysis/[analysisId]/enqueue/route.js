@@ -1,11 +1,12 @@
-// E:\PROGRAMMING\CVITX2\CVITX\app\api\workspaces\[workspaceId]\image-analysis\[analysisId]\enqueue\route.js
-
+// app/api/workspaces/[workspaceId]/image-analysis/[analysisId]/enqueue/route.js
 import { authHeaders, buildBackendUrl, getWid, passThru } from "../../../_utils";
 
 export async function POST(req, ctx) {
   try {
-    const wid = await getWid(ctx.params);
-    const { analysisId } = ctx.params;
+    // Next 15/16: ctx.params can be a Promise; unwrap it once.
+    const params = await ctx.params;
+    const wid = await getWid(params);
+    const { analysisId } = params;
 
     // Prefer the singular alias (always mounted on your backend)
     const url = buildBackendUrl(`/workspaces/${wid}/image-analysis/${analysisId}/enqueue`);
@@ -19,7 +20,9 @@ export async function POST(req, ctx) {
 
     // Fallback: if this backend only mounted the plural router
     if (r.status === 404) {
-      const fallbackUrl = buildBackendUrl(`/workspaces/${wid}/image-analyses/${analysisId}/enqueue`);
+      const fallbackUrl = buildBackendUrl(
+        `/workspaces/${wid}/image-analyses/${analysisId}/enqueue`
+      );
       r = await fetch(fallbackUrl, {
         method: "POST",
         headers,

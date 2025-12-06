@@ -1,8 +1,11 @@
+// app/api/workspaces/[workspaceId]/image-analysis/commit/route.js
 import { authHeaders, buildBackendUrl, getWid, passThru } from "../../_utils";
 
 export async function POST(req, ctx) {
   try {
-    const wid = await getWid(ctx.params);
+    // Next 15/16: ctx.params can be a Promise; unwrap it once.
+    const params = await ctx.params;
+    const wid = await getWid(params);
     const url = buildBackendUrl(`/workspaces/${wid}/image-analyses/commit`);
     const h = { ...(await authHeaders()), "content-type": "application/json" };
     const body = await req.text();
