@@ -12,6 +12,25 @@ export async function GET(req, ctx) {
   try {
     const wid = await getWid(ctx.params);
     const { videoId, detectionId } = ctx.params;
+
+    // Guard against bogus IDs (string "undefined", "null", empty, etc.)
+    if (
+      !videoId ||
+      videoId === "undefined" ||
+      videoId === "null" ||
+      !detectionId ||
+      detectionId === "undefined" ||
+      detectionId === "null"
+    ) {
+      console.error("[video-detection-show] invalid route params:", {
+        videoId,
+        detectionId,
+      });
+      return new Response("Invalid detection route params", {
+        status: 400,
+      });
+    }
+
     const { search } = new URL(req.url);
     const url = buildBackendUrl(
       `/workspaces/${wid}/videos/${videoId}/detections/${detectionId}${search || ""}`
@@ -29,7 +48,28 @@ export async function PATCH(req, ctx) {
   try {
     const wid = await getWid(ctx.params);
     const { videoId, detectionId } = ctx.params;
-    const url = buildBackendUrl(`/workspaces/${wid}/videos/${videoId}/detections/${detectionId}`);
+
+    // Guard against bogus IDs (string "undefined", "null", empty, etc.)
+    if (
+      !videoId ||
+      videoId === "undefined" ||
+      videoId === "null" ||
+      !detectionId ||
+      detectionId === "undefined" ||
+      detectionId === "null"
+    ) {
+      console.error("[video-detection-update] invalid route params:", {
+        videoId,
+        detectionId,
+      });
+      return new Response("Invalid detection route params", {
+        status: 400,
+      });
+    }
+
+    const url = buildBackendUrl(
+      `/workspaces/${wid}/videos/${videoId}/detections/${detectionId}`
+    );
     const headers = { ...(await authHeaders()), "content-type": "application/json" };
     const body = await req.text();
     const r = await fetch(url, { method: "PATCH", headers, body, cache: "no-store" });

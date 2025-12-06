@@ -12,8 +12,19 @@ export async function GET(req, ctx) {
   try {
     const wid = await getWid(ctx.params);
     const { videoId } = ctx.params;
+
+    // Guard against bogus IDs (string "undefined", "null", empty, etc.)
+    if (!videoId || videoId === "undefined" || videoId === "null") {
+      console.error("[video-detections] invalid videoId from route params:", videoId);
+      return new Response("Invalid videoId", {
+        status: 400,
+      });
+    }
+
     const { search } = new URL(req.url);
-    const url = buildBackendUrl(`/workspaces/${wid}/videos/${videoId}/detections${search || ""}`);
+    const url = buildBackendUrl(
+      `/workspaces/${wid}/videos/${videoId}/detections${search || ""}`
+    );
     const headers = await authHeaders();
     const r = await fetch(url, { headers, cache: "no-store" });
     return passThru(r);

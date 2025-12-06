@@ -1,4 +1,3 @@
-// components/modules/FootagePlayback.jsx
 "use client"
 
 /*
@@ -178,8 +177,19 @@ async function listWorkspaceVideos(wid) {
 }
 
 // Get a short-lived playback URL for a video.
+// Hard guard: never allow bogus IDs like "undefined" to hit the API.
 async function getVideoPreviewUrl(wid, vid) {
-  const r = await fetch(`/api/workspaces/${wid}/videos/${vid}/url`, {
+  const safeVid = getSafeVideoId(vid)
+
+  if (!wid || !safeVid) {
+    throw new Error(
+      `[FootagePlayback] getVideoPreviewUrl called with invalid ids (wid=${String(
+        wid
+      )}, vid=${String(vid)})`
+    )
+  }
+
+  const r = await fetch(`/api/workspaces/${wid}/videos/${safeVid}/url`, {
     cache: "no-store",
   })
   if (!r.ok) {
@@ -192,17 +202,30 @@ async function getVideoPreviewUrl(wid, vid) {
 }
 
 // List detections for a single video (current variant = "cmt").
+// Hard guard: normalize video ID and reject invalid ones up-front.
 async function listVideoDetections(wid, vid, variant = "cmt") {
+  const safeVid = getSafeVideoId(vid)
+
+  if (!wid || !safeVid) {
+    throw new Error(
+      `[FootagePlayback] listVideoDetections called with invalid ids (wid=${String(
+        wid
+      )}, vid=${String(vid)})`
+    )
+  }
+
   const params = new URLSearchParams({ variant })
   const r = await fetch(
-    `/api/workspaces/${wid}/videos/${vid}/detections?${params.toString()}`,
+    `/api/workspaces/${wid}/videos/${safeVid}/detections?${params.toString()}`,
     { cache: "no-store" }
   )
   if (!r.ok) {
     throw new Error(
       await r
         .text()
-        .catch(() => `Failed to list detections for video ${vid} (${r.status})`)
+        .catch(
+          () => `Failed to list detections for video ${safeVid} (${r.status})`
+        )
     )
   }
   return r.json()

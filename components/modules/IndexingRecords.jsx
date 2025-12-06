@@ -4,6 +4,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { useParams } from "next/navigation"
 import { useAppStore } from "@/lib/store"
+import { isValidVideoId } from "@/lib/videoAnalysis"
 
 import {
   Table,
@@ -80,16 +81,6 @@ const options = {
 }
 
 /* ---------------- helpers ---------------- */
-
-// Basic UUID + "not undefined" guard for video IDs
-function isValidVideoId(value) {
-  if (typeof value !== "string") return false
-  const v = value.trim()
-  if (!v || v === "undefined") return false
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-    v
-  )
-}
 
 // Returns a trimmed UUID string or null when invalid.
 // This is the safe value to interpolate into /videos/:videoId/... paths.
@@ -759,6 +750,12 @@ export default function IndexingRecords() {
   const [page, setPage] = useState(1)
   const itemsPerPage = 20
 
+  // Stable, validated video id for playback scope; null when invalid.
+  const playbackSafeVideoId = useMemo(
+    () => getSafeVideoId(playbackSelectedVideoId),
+    [playbackSelectedVideoId]
+  )
+
   // dialogs
   const [detailsId, setDetailsId] = useState(null)
   const [manageId, setManageId] = useState(null)
@@ -788,19 +785,17 @@ export default function IndexingRecords() {
       try {
         const bucket = []
 
-        const safeVideoId = getSafeVideoId(playbackSelectedVideoId)
-
         // Video-scoped: detections for the selected video only
-        if (playbackMode === "video" && safeVideoId) {
+        if (playbackMode === "video" && playbackSafeVideoId) {
           const res = await fetch(
-            `/api/workspaces/${wid}/videos/${safeVideoId}/detections?variant=cmt&presign=1&ttl=900`,
+            `/api/workspaces/${wid}/videos/${playbackSafeVideoId}/detections?variant=cmt&presign=1&ttl=900`,
             { cache: "no-store" }
           )
           if (res.ok) {
             const d = await res.json()
             const items = Array.isArray(d.items) ? d.items : []
-            const videoMeta = videosById[safeVideoId] || null
-            const vidFromPayload = d.videoId || safeVideoId
+            const videoMeta = videosById[playbackSafeVideoId] || null
+            const vidFromPayload = d.videoId || playbackSafeVideoId
 
             for (const det of items) {
               bucket.push(
@@ -853,7 +848,7 @@ export default function IndexingRecords() {
         }
       }
     },
-    [wid, playbackMode, playbackSelectedVideoId, videosById]
+    [wid, playbackMode, playbackSafeVideoId, videosById]
   )
 
   // Initial + scope-change load
@@ -988,7 +983,7 @@ export default function IndexingRecords() {
       <div className="w-full mb-4 flex items-center justify-between text-xs text-neutral-400">
         <span>
           Scope:&nbsp;
-          {playbackMode === "video" && playbackSelectedVideoId
+          {playbackMode === "video" && playbackSafeVideoId
             ? "Video scope — detections for selected playback video"
             : "All videos in this workspace"}
         </span>

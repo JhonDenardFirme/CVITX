@@ -1,4 +1,3 @@
-// File: components/modules/VideoAnalysisDetailsDialog.jsx
 "use client";
 
 import { useEffect, useState, Fragment } from "react";
@@ -454,23 +453,38 @@ export default function VideoAnalysisDetailsDialog({
         let url;
 
         // Compute a "safe" video ID: only use it if it looks like a UUID and
-        // is not the literal string "undefined". Otherwise, we fall back to
-        // the legacy proxy path that doesn't require a videoId.
+        // is not the literal string "undefined".
         const safeVideoId =
           typeof videoId === "string" && isValidVideoId(videoId)
             ? videoId.trim()
             : null;
 
         if (routeWid && safeVideoId) {
-          // Preferred path for video-analysis detections (per-video details)
+          // Preferred path for video-analysis detections (per-video details).
+          // This is the only branch that ever hits:
+          //   /workspaces/:wid/videos/:videoId/detections/:id
           url = `/api/workspaces/${routeWid}/videos/${safeVideoId}/detections/${id}?presign=1&ttl=900`;
         } else {
-          // Backwards-compatible fallback for legacy image-analysis or
-          // any detection that doesn't have a valid videoId attached.
+          // Backwards-compatible fallback for:
+          // - legacy image-analysis detections that don't have a videoId, or
+          // - any case where videoId is present but NOT a valid UUID.
           //
-          // This avoids ever calling:
+          // In the latter case we log a warning so we can trace unexpected
+          // "undefined"/junk video IDs without ever calling:
           //   /workspaces/:wid/videos/undefined/detections/:id
           // which would cause Postgres to reject "undefined" as a UUID.
+          if (
+            routeWid &&
+            typeof videoId === "string" &&
+            videoId.trim() &&
+            !safeVideoId
+          ) {
+            console.warn(
+              "[VideoAnalysisDetailsDialog] Invalid videoId for detection; falling back to legacy proxy path.",
+              { id, routeWid, videoId }
+            );
+          }
+
           url = `/api/proxy/detections/${id}`;
         }
 
