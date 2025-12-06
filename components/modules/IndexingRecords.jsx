@@ -310,16 +310,23 @@ function normalizeVideoDetectionRow(det, ctx) {
 
   const plateText = det.plateText || det.plate_text || ""
 
-  // Snapshot / plate URLs (aligned with VideoAnalysisDetailsDialog.normalizeDetectionView)
+  // Snapshot / plate URLs
+  // NOTE:
+  // - Prefer a dedicated per-detection snapshot URL if the backend exposes it
+  //   (top-level `snapshotUrl` / `snapshot_url` or under `assets.*`).
+  // - Only fall back to analysis-level images (vehicle / annotated) when there
+  //   is no per-detection snapshot available.
   const snapshotUrl =
-    assets.annotatedUrl ||
-    assets.annotated_url ||
-    assets.vehicleUrl ||
-    assets.vehicle_url ||
     det.snapshotUrl ||
     det.snapshot_url ||
+    assets.snapshotUrl ||
+    assets.snapshot_url ||
     det.image ||
     det.snapshot ||
+    assets.vehicleUrl ||
+    assets.vehicle_url ||
+    assets.annotatedUrl ||
+    assets.annotated_url ||
     null
 
   const plateUrl =

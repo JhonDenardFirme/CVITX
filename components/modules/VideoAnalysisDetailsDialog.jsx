@@ -348,15 +348,22 @@ function normalizeDetectionView(raw) {
 
   const assets = raw.assets || {};
 
+  // Snapshot URL:
+  // - Prefer a dedicated per-detection snapshot URL (top-level or under assets)
+  //   if the backend exposes it via snapshotS3Key to snapshotUrl mapping.
+  // - Fall back to legacy per-detection fields (image or snapshot).
+  // - Only as a last resort, use analysis-level images (vehicle or annotated).
   const snapshotUrl =
-    assets.annotatedUrl ||
-    assets.annotated_url ||
-    assets.vehicleUrl ||
-    assets.vehicle_url ||
     raw.snapshotUrl ||
     raw.snapshot_url ||
+    assets.snapshotUrl ||
+    assets.snapshot_url ||
     raw.image ||
     raw.snapshot ||
+    assets.vehicleUrl ||
+    assets.vehicle_url ||
+    assets.annotatedUrl ||
+    assets.annotated_url ||
     null;
 
   const plateUrl =
