@@ -10,8 +10,10 @@ import { authHeaders, buildBackendUrl, getWid, passThru } from "../../../_utils"
  */
 export async function GET(req, ctx) {
   try {
-    const wid = await getWid(ctx.params);
-    const { videoId } = ctx.params;
+    // Next 16: ctx.params can be a Promise; unwrap it once.
+    const params = await ctx.params;
+    const wid = await getWid(params);
+    const { videoId } = params;
 
     // Guard against bogus IDs (string "undefined", "null", empty, etc.)
     if (!videoId || videoId === "undefined" || videoId === "null") {

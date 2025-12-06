@@ -10,8 +10,10 @@ import { authHeaders, buildBackendUrl, getWid, passThru } from "../../../../_uti
  */
 export async function GET(req, ctx) {
   try {
-    const wid = await getWid(ctx.params);
-    const { videoId, detectionId } = ctx.params;
+    // Next 16: ctx.params can be a Promise; unwrap it once.
+    const params = await ctx.params;
+    const wid = await getWid(params);
+    const { videoId, detectionId } = params;
 
     // Guard against bogus IDs (string "undefined", "null", empty, etc.)
     if (
@@ -46,8 +48,10 @@ export async function GET(req, ctx) {
 
 export async function PATCH(req, ctx) {
   try {
-    const wid = await getWid(ctx.params);
-    const { videoId, detectionId } = ctx.params;
+    // Next 16: ctx.params can be a Promise; unwrap it once.
+    const params = await ctx.params;
+    const wid = await getWid(params);
+    const { videoId, detectionId } = params;
 
     // Guard against bogus IDs (string "undefined", "null", empty, etc.)
     if (

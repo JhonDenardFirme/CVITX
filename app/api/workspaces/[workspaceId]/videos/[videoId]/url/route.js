@@ -13,8 +13,10 @@ import { authHeaders, buildBackendUrl, getWid, passThru } from "../../../_utils"
  */
 export async function GET(req, ctx) {
   try {
-    const wid = await getWid(ctx.params);
-    const { videoId } = ctx.params;
+    // Next 16: ctx.params can be a Promise; unwrap it once.
+    const params = await ctx.params;
+    const wid = await getWid(params);
+    const { videoId } = params;
 
     // Build query with default/clamped TTL but keep all other params intact
     const inUrl = new URL(req.url);

@@ -3,8 +3,10 @@ import { authHeaders, buildBackendUrl, getWid, passThru } from "../../_utils";
 
 export async function GET(req, ctx) {
   try {
-    const wid = await getWid(ctx.params);
-    const analysisId = ctx.params.analysisId; // no await needed
+    // Next 16: ctx.params can be a Promise; unwrap it once.
+    const params = await ctx.params;
+    const wid = await getWid(params);
+    const analysisId = params.analysisId;
     const { search } = new URL(req.url);      // preserve ?presign=&ttl= (and future params)
     const url = buildBackendUrl(
       `/workspaces/${wid}/image-analysis/${analysisId}${search || ""}`
