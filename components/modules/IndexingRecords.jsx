@@ -81,6 +81,16 @@ const options = {
 
 /* ---------------- helpers ---------------- */
 
+// Basic UUID + "not undefined" guard for video IDs
+function isValidVideoId(value) {
+  if (typeof value !== "string") return false
+  const v = value.trim()
+  if (!v || v === "undefined") return false
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    v
+  )
+}
+
 // stable empty object to keep useSyncExternalStore snapshots referentially equal
 const EMPTY_CATALOG = Object.freeze({})
 
@@ -405,9 +415,12 @@ function EditDangerDialog({
   }, [open])
 
   const doSave = async () => {
-    if (!workspaceId || !videoId) {
+    const safeVideoId = isValidVideoId(videoId)
+
+    if (!workspaceId || !safeVideoId) {
       toast("Cannot save detection", {
-        description: "Missing workspace or video context for save.",
+        description:
+          "Missing or invalid workspace or video context for save.",
       })
       return
     }
@@ -432,7 +445,7 @@ function EditDangerDialog({
       }
 
       const r = await fetch(
-        `/api/workspaces/${workspaceId}/videos/${videoId}/detections/${item.id}`,
+        `/api/workspaces/${workspaceId}/videos/${safeVideoId}/detections/${item.id}`,
         {
           method: "PATCH",
           headers: { "content-type": "application/json" },
@@ -481,17 +494,20 @@ function EditDangerDialog({
   }
 
   const doDelete = async () => {
-    if (!workspaceId || !videoId) {
-      toast("Cannot delete detection", {
-        description: "Missing workspace or video context for delete.",
-      })
-      return
-    }
-
     setDeleting(true)
     try {
+      const safeVideoId = isValidVideoId(videoId)
+
+      if (!workspaceId || !safeVideoId) {
+        toast("Cannot delete detection", {
+          description:
+            "Missing or invalid workspace or video context for delete.",
+        })
+        return
+      }
+
       const r = await fetch(
-        `/api/workspaces/${workspaceId}/videos/${videoId}/detections/${item.id}`,
+        `/api/workspaces/${workspaceId}/videos/${safeVideoId}/detections/${item.id}`,
         {
           method: "DELETE",
         }
@@ -766,18 +782,19 @@ export default function IndexingRecords() {
       try {
         const bucket = []
 
+        const safeVideoId = isValidVideoId(playbackSelectedVideoId)
+
         // Video-scoped: detections for the selected video only
-        if (playbackMode === "video" && playbackSelectedVideoId) {
+        if (playbackMode === "video" && safeVideoId) {
           const res = await fetch(
-            `/api/workspaces/${wid}/videos/${playbackSelectedVideoId}/detections?variant=cmt&presign=1&ttl=900`,
+            `/api/workspaces/${wid}/videos/${safeVideoId}/detections?variant=cmt&presign=1&ttl=900`,
             { cache: "no-store" }
           )
           if (res.ok) {
             const d = await res.json()
             const items = Array.isArray(d.items) ? d.items : []
-            const videoMeta =
-              videosById[playbackSelectedVideoId] || null
-            const vidFromPayload = d.videoId || playbackSelectedVideoId
+            const videoMeta = videosById[safeVideoId] || null
+            const vidFromPayload = d.videoId || safeVideoId
 
             for (const det of items) {
               bucket.push(
@@ -1125,15 +1142,28 @@ export default function IndexingRecords() {
                         className="cursor-pointer hover:text-orange-500"
                         title="Seek player to this detection"
                         onClick={() => {
-                          if (!item.video_id) return
-                          const meta = videosById[item.video_id]
+                          const vid = item.video_id
+                          if (!isValidVideoId(vid)) {
+                            console.warn(
+                              "[IndexingRecords] Ignoring invalid video_id on timestamp click:",
+                              vid,
+                              item
+                            )
+                            return
+                          }
+
+                          const meta = videosById[vid]
+                          if (!meta) {
+                            console.warn(
+                              "[IndexingRecords] No video meta found for video_id:",
+                              vid
+                            )
+                            return
+                          }
+
                           const ms = computeSeekMs(item, meta)
-                          setPlaybackVideo(item.video_id)
-                          requestPlayerSeek({
-                            videoId: item.video_id,
-                            ms,
-                            autoplay: true,
-                          })
+                          setPlaybackVideo(vid)
+                          requestPlayerSeek({ videoId: vid, ms, autoplay: true })
                         }}
                       >
                         <span suppressHydrationWarning>

@@ -25,6 +25,19 @@ const PLATE_FRAME =
   "w-full h-24 rounded-md overflow-hidden border border-neutral-800 bg-black";
 const PLATE_IMG = "h-full w-full object-contain";
 
+// Guard helper: ensure we only treat real UUIDs as valid video IDs.
+// This prevents the literal string "undefined" (and other junk)
+// from being used in /videos/:videoId/... routes.
+function isValidVideoId(value) {
+  if (typeof value !== "string") return false;
+  const v = value.trim();
+  if (!v || v === "undefined") return false;
+  // Simple UUID-ish pattern (v4/v5); good enough to reject obvious garbage.
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    v
+  );
+}
+
 function pct(x) {
   if (x == null || Number.isNaN(+x)) return "—";
   const n = Math.max(0, Math.min(1, +x));
@@ -439,11 +452,25 @@ export default function VideoAnalysisDetailsDialog({
               : null;
 
         let url;
-        // Preferred path for video-analysis detections
-        if (routeWid && videoId) {
-          url = `/api/workspaces/${routeWid}/videos/${videoId}/detections/${id}?presign=1&ttl=900`;
+
+        // Compute a "safe" video ID: only use it if it looks like a UUID and
+        // is not the literal string "undefined". Otherwise, we fall back to
+        // the legacy proxy path that doesn't require a videoId.
+        const safeVideoId =
+          typeof videoId === "string" && isValidVideoId(videoId)
+            ? videoId.trim()
+            : null;
+
+        if (routeWid && safeVideoId) {
+          // Preferred path for video-analysis detections (per-video details)
+          url = `/api/workspaces/${routeWid}/videos/${safeVideoId}/detections/${id}?presign=1&ttl=900`;
         } else {
-          // Backwards-compatible fallback for legacy image-analysis
+          // Backwards-compatible fallback for legacy image-analysis or
+          // any detection that doesn't have a valid videoId attached.
+          //
+          // This avoids ever calling:
+          //   /workspaces/:wid/videos/undefined/detections/:id
+          // which would cause Postgres to reject "undefined" as a UUID.
           url = `/api/proxy/detections/${id}`;
         }
 

@@ -118,6 +118,18 @@ function formatTime(seconds) {
   return [hrs, mins, secs].map((v) => String(v).padStart(2, "0")).join(":")
 }
 
+// Basic UUID validator plus guard against the literal string "undefined".
+// This is the local gate to ensure we never call per-video endpoints
+// with invalid IDs like "undefined" or empty strings.
+function isValidVideoId(value) {
+  if (typeof value !== "string") return false
+  const v = value.trim()
+  if (!v || v === "undefined") return false
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    v
+  )
+}
+
 // Thin API helpers
 
 // List videos for a workspace.
@@ -192,7 +204,9 @@ async function listVideoDetections(wid, vid, variant = "cmt") {
 async function listWorkspaceDetectionsAll(wid, videos, variant = "cmt") {
   const results = []
   for (const v of videos) {
-    if (!v?.id) continue
+    // Skip videos without a usable UUID; never call per-video endpoints
+    // with invalid IDs like "undefined".
+    if (!v?.id || !isValidVideoId(v.id)) continue
     try {
       const one = await listVideoDetections(wid, v.id, variant)
       results.push(one)
@@ -306,15 +320,18 @@ export default function FootagePlayback() {
   useEffect(() => {
     let cancel = false
 
+    const safeVid = isValidVideoId(playbackSelectedVideoId)
+
     async function resolveUrl() {
-      if (!wid || playbackMode !== "video" || !playbackSelectedVideoId) {
+      // Guard: only attempt per-video URL fetches when there is a valid UUID.
+      if (!wid || playbackMode !== "video" || !safeVid) {
         setPreviewUrl(null)
         setUrlError(null)
         setUrlRetries(0)
         return
       }
       try {
-        const url = await getVideoPreviewUrl(wid, playbackSelectedVideoId)
+        const url = await getVideoPreviewUrl(wid, safeVid)
         if (cancel) return
         if (!url) {
           setPreviewUrl(null)
@@ -410,26 +427,64 @@ export default function FootagePlayback() {
     if (videoList.length === 0) return
 
     if (playbackMode !== "video" || !playbackSelectedVideoId) {
-      setPlaybackVideo(videoList[0]?.id)
+      const firstId = videoList[0]?.id
+      if (!isValidVideoId(firstId)) {
+        console.warn(
+          "[FootagePlayback] First video id is invalid, cannot select:",
+          firstId
+        )
+        setPlaybackAll()
+        return
+      }
+      setPlaybackVideo(firstId)
       return
     }
 
     const idx = videoList.findIndex((x) => x.id === playbackSelectedVideoId)
     const prevIdx = Math.max(idx - 1, 0)
-    setPlaybackVideo(videoList[prevIdx]?.id)
+    const targetId = videoList[prevIdx]?.id
+
+    if (!isValidVideoId(targetId)) {
+      console.warn(
+        "[FootagePlayback] Prev video id is invalid, ignoring:",
+        targetId
+      )
+      return
+    }
+
+    setPlaybackVideo(targetId)
   }
 
   const handleNextVideo = () => {
     if (videoList.length === 0) return
 
     if (playbackMode !== "video" || !playbackSelectedVideoId) {
-      setPlaybackVideo(videoList[0]?.id)
+      const firstId = videoList[0]?.id
+      if (!isValidVideoId(firstId)) {
+        console.warn(
+          "[FootagePlayback] First video id is invalid, cannot select:",
+          firstId
+        )
+        setPlaybackAll()
+        return
+      }
+      setPlaybackVideo(firstId)
       return
     }
 
     const idx = videoList.findIndex((x) => x.id === playbackSelectedVideoId)
     const nextIdx = Math.min(idx + 1, videoList.length - 1)
-    setPlaybackVideo(videoList[nextIdx]?.id)
+    const targetId = videoList[nextIdx]?.id
+
+    if (!isValidVideoId(targetId)) {
+      console.warn(
+        "[FootagePlayback] Next video id is invalid, ignoring:",
+        targetId
+      )
+      return
+    }
+
+    setPlaybackVideo(targetId)
   }
 
   const handleTimeInputCommit = () => {
@@ -460,6 +515,12 @@ export default function FootagePlayback() {
   const handleVideoError = async () => {
     if (!wid || playbackMode !== "video" || !playbackSelectedVideoId) return
 
+    const safeVid = isValidVideoId(playbackSelectedVideoId)
+    if (!safeVid) {
+      setUrlError("Playback error: invalid video id.")
+      return
+    }
+
     if (urlRetries >= 1) {
       setUrlError("Playback error: signed URL may have expired.")
       return
@@ -469,7 +530,7 @@ export default function FootagePlayback() {
       const v = videoRef.current
       if (v) setResumeAt(v.currentTime || 0)
 
-      const url = await getVideoPreviewUrl(wid, playbackSelectedVideoId)
+      const url = await getVideoPreviewUrl(wid, safeVid)
       setPreviewUrl(url || null)
       setUrlRetries((n) => n + 1)
       setUrlError(null)
@@ -523,6 +584,14 @@ export default function FootagePlayback() {
     return "—"
   })()
 
+  // Ensure the Select never shows an invalid id as the selected value.
+  const safeSelectedId =
+    playbackMode === "video" && isValidVideoId(playbackSelectedVideoId)
+      ? playbackSelectedVideoId
+      : null
+
+  const selectValue = safeSelectedId || "all"
+
   return (
     <div className="w-full h-full flex flex-col p-8 items-center">
       {/* Header strip */}
@@ -532,11 +601,7 @@ export default function FootagePlayback() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/icons/video.svg" alt="Video" className="w-4 h-4" />
           <Select
-            value={
-              playbackMode === "all"
-                ? "all"
-                : playbackSelectedVideoId || "all"
-            }
+            value={selectValue}
             onValueChange={async (val) => {
               if (!wid) return
 
@@ -563,6 +628,18 @@ export default function FootagePlayback() {
                   setDetectionsLoading(false)
                 }
               } else {
+                // Guard: never accept an invalid or "undefined" video id
+                // from the selector. Fall back to ALL scope instead.
+                if (!isValidVideoId(val)) {
+                  console.warn(
+                    "[FootagePlayback] Ignoring invalid selection value:",
+                    val
+                  )
+                  setPlaybackAll()
+                  setDetectionScope({ mode: "all", videoId: null })
+                  return
+                }
+
                 setPlaybackVideo(val)
                 setDetectionScope({ mode: "video", videoId: val })
 
