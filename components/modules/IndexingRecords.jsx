@@ -91,6 +91,12 @@ function isValidVideoId(value) {
   )
 }
 
+// Returns a trimmed UUID string or null when invalid.
+// This is the safe value to interpolate into /videos/:videoId/... paths.
+function getSafeVideoId(value) {
+  return isValidVideoId(value) ? String(value).trim() : null
+}
+
 // stable empty object to keep useSyncExternalStore snapshots referentially equal
 const EMPTY_CATALOG = Object.freeze({})
 
@@ -415,7 +421,7 @@ function EditDangerDialog({
   }, [open])
 
   const doSave = async () => {
-    const safeVideoId = isValidVideoId(videoId)
+    const safeVideoId = getSafeVideoId(videoId)
 
     if (!workspaceId || !safeVideoId) {
       toast("Cannot save detection", {
@@ -496,7 +502,7 @@ function EditDangerDialog({
   const doDelete = async () => {
     setDeleting(true)
     try {
-      const safeVideoId = isValidVideoId(videoId)
+      const safeVideoId = getSafeVideoId(videoId)
 
       if (!workspaceId || !safeVideoId) {
         toast("Cannot delete detection", {
@@ -782,7 +788,7 @@ export default function IndexingRecords() {
       try {
         const bucket = []
 
-        const safeVideoId = isValidVideoId(playbackSelectedVideoId)
+        const safeVideoId = getSafeVideoId(playbackSelectedVideoId)
 
         // Video-scoped: detections for the selected video only
         if (playbackMode === "video" && safeVideoId) {

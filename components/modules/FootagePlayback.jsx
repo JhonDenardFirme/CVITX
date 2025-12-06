@@ -130,6 +130,14 @@ function isValidVideoId(value) {
   )
 }
 
+// Returns a trimmed UUID string or null when invalid.
+// Use this whenever you need the actual ID for /videos/:videoId/... paths.
+function getSafeVideoId(value) {
+  if (typeof value !== "string") return null
+  const v = value.trim()
+  return isValidVideoId(v) ? v : null
+}
+
 // Thin API helpers
 
 // List videos for a workspace.
@@ -320,7 +328,7 @@ export default function FootagePlayback() {
   useEffect(() => {
     let cancel = false
 
-    const safeVid = isValidVideoId(playbackSelectedVideoId)
+    const safeVid = getSafeVideoId(playbackSelectedVideoId)
 
     async function resolveUrl() {
       // Guard: only attempt per-video URL fetches when there is a valid UUID.
@@ -515,7 +523,7 @@ export default function FootagePlayback() {
   const handleVideoError = async () => {
     if (!wid || playbackMode !== "video" || !playbackSelectedVideoId) return
 
-    const safeVid = isValidVideoId(playbackSelectedVideoId)
+    const safeVid = getSafeVideoId(playbackSelectedVideoId)
     if (!safeVid) {
       setUrlError("Playback error: invalid video id.")
       return
@@ -621,8 +629,7 @@ export default function FootagePlayback() {
                   setDetectionsForAll(wid, aggregated)
                 } catch (e) {
                   setDetectionsError(
-                    e?.message ||
-                      "Failed to load detections for all videos"
+                    e?.message || "Failed to load detections for all videos"
                   )
                 } finally {
                   setDetectionsLoading(false)
@@ -649,8 +656,7 @@ export default function FootagePlayback() {
                   setDetectionsForVideo(wid, val, data)
                 } catch (e) {
                   setDetectionsError(
-                    e?.message ||
-                      `Failed to load detections for video ${val}`
+                    e?.message || `Failed to load detections for video ${val}`
                   )
                 } finally {
                   setDetectionsLoading(false)
