@@ -118,6 +118,27 @@ function fmtHuman(dt) {
   return `${dPart} | ${tPart}`
 }
 
+// Human-friendly status labels for display, while keeping internal values lowercase.
+// This ensures we stay compatible with the backend enum but show proper capitalization in the UI.
+function formatStatusLabel(status) {
+  if (!status) return "-"
+  const s = String(status).toLowerCase()
+  switch (s) {
+    case "uploaded":
+      return "Uploaded"
+    case "queued":
+      return "Queued"
+    case "processing":
+      return "Processing"
+    case "done":
+      return "Done"
+    case "error":
+      return "Error"
+    default:
+      return s.charAt(0).toUpperCase() + s.slice(1)
+  }
+}
+
 /* ---------------- shape normalizer ---------------- */
 
 /**
@@ -745,7 +766,7 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
 
   async function doSave() {
     if (!canEdit) {
-      toast.error("Only videos in 'uploaded' state can be edited.")
+      toast.error("Only videos in 'Uploaded' state can be edited.")
       return
     }
     try {
@@ -806,7 +827,7 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
               <DialogTitle>Edit Video Details</DialogTitle>
               <DialogDescription>
                 You can edit the file name, camera label, and recorded time while status is{" "}
-                <span className="font-mono">uploaded</span>. Camera Code is immutable post-commit.
+                <span className="font-mono">Uploaded</span>. Camera Code is immutable post-commit.
               </DialogDescription>
             </DialogHeader>
 
@@ -932,9 +953,9 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
           ]
             .filter(Boolean)
             .join(" ")}
-          title={`Status: ${String(v.status || "-")}`}
+          title={`Status: ${formatStatusLabel(v.status)}`}
         >
-          {String(v.status || "-")}
+          {formatStatusLabel(v.status)}
         </span>
       </div>
 
@@ -969,7 +990,13 @@ function VideoCard({ wid, v, onChange, onRemove, refreshAll }) {
                 : "opacity-50 cursor-not-allowed border-neutral-700"
             }`}
           >
-            {pendingAnalyze ? "Queuing…" : v.status === "uploaded" ? "Analyze" : "Analyzing…"}
+            {pendingAnalyze
+              ? "Queuing…"
+              : v.status === "uploaded"
+              ? "Analyze"
+              : v.status === "done"
+              ? "Analyzed"
+              : "Analyzing…"}
           </button>
         </div>
 
