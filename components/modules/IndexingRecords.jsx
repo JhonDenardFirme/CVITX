@@ -242,13 +242,15 @@ function normalizeVideoDetectionRow(det, ctx) {
   const vm = ctx?.videoMeta || {}
   const workspaceId = ctx?.workspaceId || vm.workspace_id || null
 
-  const colorsArr = Array.isArray(det.colors)
-    ? det.colors
-        .map((c) =>
-          c && c.base ? String(c.base).toUpperCase().trim() : ""
-        )
-        .filter(Boolean)
-    : []
+  // Preserve full colors array for export (FBL objects from backend)
+  const colorsFull = Array.isArray(det.colors) ? det.colors : []
+
+  // Derived simple color list (base, UPPERCASE) for filtering/display
+  const colorsArr = colorsFull
+    .map((c) =>
+      c && c.base ? String(c.base).toUpperCase().trim() : ""
+    )
+    .filter(Boolean)
 
   const trackId =
     typeof det.trackId === "number"
@@ -317,6 +319,36 @@ function normalizeVideoDetectionRow(det, ctx) {
 
   const plateText = det.plateText || det.plate_text || ""
 
+  const plateConf =
+    typeof det.plateConf === "number"
+      ? det.plateConf
+      : typeof det.plate_conf === "number"
+      ? det.plate_conf
+      : null
+
+  const latencyMs =
+    typeof det.latencyMs === "number"
+      ? det.latencyMs
+      : typeof det.latency_ms === "number"
+      ? det.latency_ms
+      : null
+
+  const memoryGb =
+    typeof det.memoryGb === "number"
+      ? det.memoryGb
+      : typeof det.memory_gb === "number"
+      ? det.memory_gb
+      : null
+
+  const gflops =
+    typeof det.gflops === "number"
+      ? det.gflops
+      : typeof det.gflop === "number"
+      ? det.gflop
+      : null
+
+  const status = det.status || null
+
   // Snapshot / plate URLs
   // NOTE:
   // - Prefer a dedicated per-detection snapshot URL if the backend exposes it
@@ -368,11 +400,21 @@ function normalizeVideoDetectionRow(det, ctx) {
     model_conf: modelConf,
 
     plate_text: plateText,
+    plate_conf: plateConf,
+
+    // Simple color bases for filters/UI
     colors: colorsArr,
+    // Full color FBL objects for CSV export
+    colors_full: colorsFull,
 
     detected_at: detectedAt,
     detected_in_ms: detectedInMs,
     recorded_at: vm.recorded_at || vm.recordedAt || null,
+
+    latency_ms: latencyMs,
+    memory_gb: memoryGb,
+    gflops,
+    status,
 
     video_title: vm.title || vm.file_name || vm.fileName || "",
     camera_code: vm.camera_code || vm.cameraCode || "",
@@ -745,6 +787,7 @@ export default function IndexingRecords() {
   const [allRecords, setAllRecords] = useState([])
   const [loading, setLoading] = useState(false)
   const [lastError, setLastError] = useState(null)
+  const [csvExporting, setCsvExporting] = useState(false)
 
   // pagination
   const [page, setPage] = useState(1)
@@ -949,6 +992,169 @@ export default function IndexingRecords() {
     setPage(1)
   }
 
+  const handleDownloadCsv = useCallback(() => {
+    if (csvExporting) return
+
+    if (!filtered.length) {
+      toast("No records to export", {
+        description: "Adjust filters or refresh data, then try again.",
+      })
+      return
+    }
+
+    try {
+      setCsvExporting(true)
+
+      const headers = [
+        "id",
+        "analysisId",
+        "trackId",
+        "detectedInMs",
+        "detectedAt",
+        "typeLabel",
+        "typeConf",
+        "makeLabel",
+        "makeConf",
+        "modelLabel",
+        "modelConf",
+        "plateText",
+        "plateConf",
+        "colors",
+        "latencyMs",
+        "memoryGb",
+        "gflops",
+        "status",
+      ]
+
+      const escapeCsv = (value) => {
+        if (value === null || value === undefined) return ""
+        const s =
+          typeof value === "string"
+            ? value
+            : value instanceof Date
+            ? value.toISOString()
+            : String(value)
+        const escaped = s.replace(/"/g, '""')
+        return `"${escaped}"`
+      }
+
+      // Use the filtered dataset (same order as UI, but without pagination)
+      const rows = filtered.map((row) => {
+        const colorsFull =
+          row.colors_full ||
+          row.colors_raw || // fallback, just in case
+          row.colors ||
+          []
+
+        const data = [
+          row.id,
+          row.analysis_id || row.analysisId,
+          row.track_id ?? row.trackId,
+          row.detected_in_ms ?? row.detectedInMs,
+          row.detected_at || row.detectedAt,
+          row.type,
+          row.type_conf,
+          row.make,
+          row.make_conf,
+          row.model,
+          row.model_conf,
+          row.plate_text,
+          row.plate_conf,
+          colorsFull ? JSON.stringify(colorsFull) : "[]",
+          row.latency_ms ?? row.latencyMs,
+          row.memory_gb ?? row.memoryGb,
+          row.gflops,
+          row.status,
+        ]
+
+        return data.map(escapeCsv).join(",")
+      })
+
+      const csvContent = [headers.join(","), ...rows].join("\r\n")
+
+      if (typeof window === "undefined") {
+        console.warn("[IndexingRecords] CSV download called on server; aborting.")
+        return
+      }
+
+      const blob = new Blob([csvContent], {
+        type: "text/csv;charset=utf-8;",
+      })
+      const url = URL.createObjectURL(blob)
+
+      const workspaceCodeRaw =
+        (currentWorkspace &&
+          (currentWorkspace.code ||
+            currentWorkspace.workspaceCode ||
+            currentWorkspace.slug ||
+            currentWorkspace.name)) ||
+        wid
+
+      const workspaceCodeSafe = String(workspaceCodeRaw || "WORKSPACE")
+        .toUpperCase()
+        .replace(/[^A-Z0-9_-]/g, "")
+
+      let cameraCodeRaw = "ALL"
+
+      if (playbackMode === "video" && playbackSafeVideoId) {
+        const vm = videosById[playbackSafeVideoId]
+        cameraCodeRaw =
+          (vm && (vm.camera_code || vm.cameraCode)) ||
+          (filtered[0] &&
+            (filtered[0].camera_code || filtered[0].cameraCode)) ||
+          "ALL"
+      } else if (filtered.length) {
+        cameraCodeRaw =
+          filtered[0].camera_code ||
+          filtered[0].cameraCode ||
+          "ALL"
+      }
+
+      const cameraCodeSafe = String(cameraCodeRaw || "ALL")
+        .toUpperCase()
+        .replace(/[^A-Z0-9_-]/g, "")
+
+      const timestamp = new Date()
+        .toISOString()
+        .replace(/:/g, "-")
+        .replace(/\.\d+Z$/, "Z")
+
+      const filename = `CVITX_${workspaceCodeSafe}_${cameraCodeSafe}_IndexingRecords_${timestamp}.csv`
+
+      const link = document.createElement("a")
+      link.href = url
+      link.setAttribute("download", filename)
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+
+
+      toast("CSV ready", {
+        description: `Exported ${filtered.length} record(s).`,
+      })
+    } catch (err) {
+      console.error("IndexingRecords CSV export error:", err)
+      toast("Failed to export CSV", {
+        description:
+          err && typeof err.message === "string"
+            ? err.message
+            : "An unexpected error occurred while preparing the CSV.",
+      })
+    } finally {
+      setCsvExporting(false)
+    }
+  }, [
+    csvExporting,
+    filtered,
+    playbackMode,
+    playbackSafeVideoId,
+    wid,
+    currentWorkspace,
+    videosById,
+  ])
+
+
   return (
     <div className="w-full h-full flex flex-col p-8 items-start justify-start">
       {/* Header */}
@@ -970,8 +1176,22 @@ export default function IndexingRecords() {
             {loading && <Loader2 className="h-3 w-3 animate-spin" />}
             Refresh
           </button>
-          <button className="text-sm px-4 py-2 gap-2 bg-orange-500 text-white rounded-md hover:bg-orange-400 flex flex-row items-center justify-center">
-            <Download size={14} />
+          <button
+            type="button"
+            onClick={handleDownloadCsv}
+            disabled={csvExporting || !filtered.length}
+            className={cn(
+              "text-sm px-4 py-2 gap-2 bg-orange-500 text-white rounded-md flex flex-row items-center justify-center",
+              (csvExporting || !filtered.length) &&
+                "opacity-70 cursor-not-allowed",
+              !csvExporting && filtered.length > 0 && "hover:bg-orange-400"
+            )}
+          >
+            {csvExporting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download size={14} />
+            )}
             Download CSV
           </button>
         </div>
