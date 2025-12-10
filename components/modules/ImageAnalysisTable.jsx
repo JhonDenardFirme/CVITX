@@ -2,6 +2,8 @@
 "use client";
 
 import { useEffect, useMemo, useState, useCallback } from "react";
+import { useAppStore } from "@/lib/store";
+import { toast } from "sonner";
 
 import {
   Table,
@@ -23,7 +25,7 @@ import { Command, CommandInput, CommandItem, CommandList } from "@/components/ui
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ChevronDown, Loader2, Eye } from "lucide-react";
+import { ChevronDown, Loader2, Eye, Download } from "lucide-react";
 
 import {
   vehicleTypes,
@@ -45,7 +47,7 @@ const options = {
   type: vehicleTypes,
   color: vehicleColors,
   make: allVehicleMakes,
-  model: allVehicleModels, // model-only strings (no MAKE_ prefix) + "-" for NULL
+  model: allVehicleModels, // model-only strings (no MAKE_ prefix) plus "-" for NULL
 };
 
 /* ───────────────────────────────────────────────────────────────
@@ -54,32 +56,35 @@ const options = {
 const p = (x) => (typeof x === "number" ? `${Math.round(x * 100)}%` : "—");
 const toLower = (v) => String(v ?? "").toLowerCase();
 
-// NULL helpers
 const isNullish = (v) =>
   v === null || v === undefined || (typeof v === "string" && v.trim() === "");
+
 const hasNullOption = (arr) => Array.isArray(arr) && arr.some((x) => x === "-");
 
-// exact (case-insensitive) match OR NULL if "-" is selected
+// exact (case-insensitive) match or NULL if "-" is selected
 function matchesNullableExact(selected, value) {
   if (!selected?.length) return true;
+
   const wantsNull = hasNullOption(selected);
   const wantsValues = selected.filter((x) => x !== "-");
+
   if (wantsNull && isNullish(value)) return true;
-  if (!wantsValues.length) return false; // only "-" selected and value is NOT nullish
+  if (!wantsValues.length) return false;
+
   return wantsValues.some((n) => toLower(n) === toLower(value));
 }
 
-// array-overlap for colors, with NULL support if "-" is selected
+// array-overlap for colors with NULL support if "-" is selected
 function matchesNullableColors(selected, values) {
   if (!selected?.length) return true;
+
   const wantsNull = hasNullOption(selected);
   const wantsValues = selected.filter((x) => x !== "-");
 
   const hasColors = Array.isArray(values) && values.length > 0;
   if (wantsNull && !hasColors) return true;
-  if (!wantsValues.length) return false; // only "-" selected and item has some colors
+  if (!wantsValues.length) return false;
 
-  // standard overlap (case-insensitive)
   const set = new Set((values || []).map(toLower));
   return wantsValues.some((n) => set.has(toLower(n)));
 }
@@ -92,15 +97,13 @@ function trimModelName(model) {
   return idx === -1 ? s : s.slice(idx + 1);
 }
 
-// model filter: support "-" (NULL), otherwise contains/equality against MAKE_MODEL
+// model filter: support "-" (NULL), otherwise contains or trimmed equality against MAKE_MODEL
 function matchesNullableModel(selectedModels, storedModel) {
   if (!selectedModels?.length) return true;
 
-  // NULL case
   const wantsNull = hasNullOption(selectedModels);
   if (wantsNull && isNullish(storedModel)) return true;
 
-  // Non-NULL matching (contains or trimmed equality)
   const nonNullSelections = selectedModels.filter((x) => x !== "-");
   if (!nonNullSelections.length) return false;
 
@@ -114,13 +117,15 @@ function matchesNullableModel(selectedModels, storedModel) {
   });
 }
 
-// render “label (conf)” with rules:
-// - if value is null/empty → print "-" and DO NOT print conf
-// - if conf < 0.5 → gray out both label and conf
+// render "label (conf)" with rules:
+// - if value is null or empty: print "-" and do not print conf
+// - if conf < 0.5: gray out both label and conf
 function renderLabelWithConf(label, conf) {
   const hasLabel = !isNullish(label);
   if (!hasLabel) return <span>-</span>;
+
   const low = typeof conf === "number" && conf < 0.5;
+
   return (
     <span className={low ? "text-neutral-700" : undefined}>
       {label}{" "}
@@ -138,17 +143,14 @@ function summarize(d) {
   const b = d?.results?.baseline || null;
   const c = d?.results?.cmt || null;
 
-  // Phase-9 canonical → legacy fallback → input
   const bAnn = b?.assets?.annotated_url || b?.annotated_image?.url || null;
   const cAnn = c?.assets?.annotated_url || c?.annotated_image?.url || null;
   const snapshot = bAnn || cAnn || d?.input_image?.url || null;
 
-  // choose single-line identity for table from either variant
   const type = b?.type || c?.type || null;
   const make = b?.make || c?.make || null;
   const model = b?.model || c?.model || null;
 
-  // COLORS → keep only the "base" string if present
   const rawColors = (b?.colors?.length ? b.colors : (c?.colors || [])) || [];
   const colors = rawColors
     .map((col) => (typeof col === "string" ? col : col?.base))
@@ -172,6 +174,8 @@ function summarize(d) {
    Main component
    ─────────────────────────────────────────────────────────────── */
 export default function ImageAnalysisTable({ workspaceId: wid }) {
+  const currentWorkspace = useAppStore((s) => s.currentWorkspace);
+
   // filters (auto-apply)
   const [selected, setSelected] = useState({
     type: [],
@@ -184,6 +188,7 @@ export default function ImageAnalysisTable({ workspaceId: wid }) {
   const [all, setAll] = useState([]); // list endpoint result (parents only)
   const [enriched, setEnriched] = useState({}); // id -> summary from iaShow
   const [loading, setLoading] = useState(false);
+  const [csvExporting, setCsvExporting] = useState(false);
 
   // paging (client-side over the fetched list)
   const [page, setPage] = useState(1);
@@ -195,31 +200,33 @@ export default function ImageAnalysisTable({ workspaceId: wid }) {
   // fetch a larger list so client-side paging works
   const LIST_LIMIT = 500;
 
-  // Single refetch function (mount + custom events)
-  const refetch = useCallback(async () => {
-    if (!wid) return;
-    setLoading(true);
-    try {
-      const list = await iaList(wid, { limit: LIST_LIMIT, offset: 0 });
-      const rows = Array.isArray(list) ? list : (list?.items || []);
-      setAll(rows);
+  // Single refetch function (mount and custom events)
+  const refetch = useCallback(
+    async () => {
+      if (!wid) return;
+      setLoading(true);
+      try {
+        const list = await iaList(wid, { limit: LIST_LIMIT, offset: 0 });
+        const rows = Array.isArray(list) ? list : list?.items || [];
+        setAll(rows);
 
-      // pre-enrich first page worth (or up to 30) so badges/snapshot render quickly
-      const start = (page - 1) * itemsPerPage;
-      const chunk = rows.slice(start, start + Math.max(itemsPerPage, 30));
-      for (const r of chunk) {
-        if (enriched[r.id]) continue;
-        try {
-          const d = await iaShow(wid, r.id);
-          setEnriched((m) => ({ ...m, [r.id]: summarize(d) }));
-        } catch {
-          // ignore enrich errors per row
+        const start = (page - 1) * itemsPerPage;
+        const chunk = rows.slice(start, start + Math.max(itemsPerPage, 30));
+        for (const r of chunk) {
+          if (enriched[r.id]) continue;
+          try {
+            const d = await iaShow(wid, r.id);
+            setEnriched((m) => ({ ...m, [r.id]: summarize(d) }));
+          } catch {
+            // ignore enrich errors per row
+          }
         }
+      } finally {
+        setLoading(false);
       }
-    } finally {
-      setLoading(false);
-    }
-  }, [wid, page, itemsPerPage, enriched]);
+    },
+    [wid, page, itemsPerPage, enriched]
+  );
 
   // Initial load
   useEffect(() => {
@@ -229,11 +236,13 @@ export default function ImageAnalysisTable({ workspaceId: wid }) {
   // Listen for uploads finishing (from the upload dialog) and re-fetch
   useEffect(() => {
     if (!wid) return;
+
     const onRefresh = (e) => {
       const targetWid = e?.detail?.wid;
       if (targetWid && targetWid !== wid) return;
       refetch();
     };
+
     window.addEventListener("ia:refresh", onRefresh);
     return () => window.removeEventListener("ia:refresh", onRefresh);
   }, [wid, refetch]);
@@ -241,6 +250,7 @@ export default function ImageAnalysisTable({ workspaceId: wid }) {
   // lazy enrich on page change
   useEffect(() => {
     let cancel = false;
+
     (async () => {
       const start = (page - 1) * itemsPerPage;
       const chunk = all.slice(start, start + itemsPerPage);
@@ -257,6 +267,7 @@ export default function ImageAnalysisTable({ workspaceId: wid }) {
         }
       }
     })();
+
     return () => {
       cancel = true;
     };
@@ -273,19 +284,11 @@ export default function ImageAnalysisTable({ workspaceId: wid }) {
     return all.filter((row) => {
       const s = enriched[row.id] || {};
 
-      // TYPE (nullable exact)
       if (!matchesNullableExact(selected.type, s.type)) return false;
-
-      // MAKE (nullable exact)
       if (!matchesNullableExact(selected.make, s.make)) return false;
-
-      // MODEL (nullable; '-' → null, else contains/trim-eq)
       if (!matchesNullableModel(selected.model, s.model)) return false;
-
-      // COLOR (nullable overlap; '-' → records with no colors)
       if (!matchesNullableColors(selected.color, s.colors)) return false;
 
-      // plate substring (unchanged)
       const plate = s?.b?.plate_text || s?.c?.plate_text || "";
       if (selected.plate && !toLower(plate).includes(toLower(selected.plate))) return false;
 
@@ -295,6 +298,7 @@ export default function ImageAnalysisTable({ workspaceId: wid }) {
 
   const total = filtered.length;
   const totalPages = Math.max(1, Math.ceil(total / itemsPerPage));
+
   const pageItems = useMemo(() => {
     const start = (page - 1) * itemsPerPage;
     return filtered.slice(start, start + itemsPerPage);
@@ -352,10 +356,206 @@ export default function ImageAnalysisTable({ workspaceId: wid }) {
     setPage(1);
   };
 
+  // CSV export handler using filtered rows and Baseline plus CMT summaries
+  const handleDownloadCsv = useCallback(
+    async () => {
+      if (csvExporting) return;
+
+      if (!filtered.length) {
+        toast("No records to export", {
+          description: "Adjust filters or refresh data, then try again.",
+        });
+        return;
+      }
+
+      try {
+        setCsvExporting(true);
+
+        // ensure we have full summaries for all filtered rows
+        const summaryById = { ...enriched };
+
+        const missingIds =
+          wid && filtered.length
+            ? filtered
+                .filter((row) => !summaryById[row.id])
+                .map((row) => row.id)
+            : [];
+
+        if (wid && missingIds.length) {
+          await Promise.all(
+            missingIds.map(async (id) => {
+              try {
+                const d = await iaShow(wid, id);
+                summaryById[id] = summarize(d);
+              } catch (err) {
+                console.warn("[ImageAnalysisTable] CSV enrich failed for analysis", id, err);
+              }
+            })
+          );
+          setEnriched(summaryById);
+        }
+
+        const headers = [
+          "id",
+          "analysis_no",
+          "created_at",
+          "analysis_status",
+
+          "baseline_type",
+          "baseline_type_conf",
+          "baseline_make",
+          "baseline_make_conf",
+          "baseline_model",
+          "baseline_model_conf",
+          "baseline_colors",
+          "baseline_plate_text",
+          "baseline_plate_conf",
+          "baseline_latency_ms",
+          "baseline_memory_gb",
+          "baseline_gflops",
+          "baseline_status",
+          "baseline_parts",
+
+          "cmt_type",
+          "cmt_type_conf",
+          "cmt_make",
+          "cmt_make_conf",
+          "cmt_model",
+          "cmt_model_conf",
+          "cmt_colors",
+          "cmt_plate_text",
+          "cmt_plate_conf",
+          "cmt_latency_ms",
+          "cmt_memory_gb",
+          "cmt_gflops",
+          "cmt_status",
+          "cmt_parts",
+        ];
+
+        const escapeCsv = (value) => {
+          if (value === null || value === undefined) return "";
+          const s =
+            typeof value === "string"
+              ? value
+              : value instanceof Date
+              ? value.toISOString()
+              : String(value);
+          const escaped = s.replace(/"/g, '""');
+          return `"${escaped}"`;
+        };
+
+        const rows = filtered.map((row) => {
+          const s = summaryById[row.id] || {};
+          const b = s.b || {};
+          const c = s.c || {};
+
+          const baselineColors = Array.isArray(b.colors) ? b.colors : [];
+          const cmtColors = Array.isArray(c.colors) ? c.colors : [];
+
+          const baselineParts = Array.isArray(b.parts) ? b.parts : [];
+          const cmtParts = Array.isArray(c.parts) ? c.parts : [];
+
+          const data = [
+            row.id,
+            row.analysis_no,
+            row.created_at || row.createdAt || null,
+            row.status || s.status || null,
+
+            b.type || null,
+            b.type_conf ?? null,
+            b.make || null,
+            b.make_conf ?? null,
+            b.model || null,
+            b.model_conf ?? null,
+            baselineColors.length ? JSON.stringify(baselineColors) : "[]",
+            b.plate_text || null,
+            b.plate_conf ?? null,
+            b.latency_ms ?? null,
+            b.memory_gb ?? null,
+            b.gflops ?? null,
+            b.status || null,
+            baselineParts.length ? JSON.stringify(baselineParts) : "[]",
+
+            c.type || null,
+            c.type_conf ?? null,
+            c.make || null,
+            c.make_conf ?? null,
+            c.model || null,
+            c.model_conf ?? null,
+            cmtColors.length ? JSON.stringify(cmtColors) : "[]",
+            c.plate_text || null,
+            c.plate_conf ?? null,
+            c.latency_ms ?? null,
+            c.memory_gb ?? null,
+            c.gflops ?? null,
+            c.status || null,
+            cmtParts.length ? JSON.stringify(cmtParts) : "[]",
+          ];
+
+          return data.map(escapeCsv).join(",");
+        });
+
+        const csvContent = [headers.join(","), ...rows].join("\r\n");
+
+        if (typeof window === "undefined") {
+          console.warn("[ImageAnalysisTable] CSV download invoked on server; aborting.");
+          return;
+        }
+
+        const blob = new Blob([csvContent], {
+          type: "text/csv;charset=utf-8;",
+        });
+        const url = URL.createObjectURL(blob);
+
+        const workspaceCodeRaw =
+          (currentWorkspace &&
+            (currentWorkspace.code ||
+              currentWorkspace.workspaceCode ||
+              currentWorkspace.slug ||
+              currentWorkspace.name)) ||
+          wid;
+
+        const workspaceCodeSafe = String(workspaceCodeRaw || "WORKSPACE")
+          .toUpperCase()
+          .replace(/[^A-Z0-9_-]/g, "");
+
+        const timestamp = new Date()
+          .toISOString()
+          .replace(/:/g, "-")
+          .replace(/\.\d+Z$/, "Z");
+
+        const filename = `CVITX_${workspaceCodeSafe}_ImageAnalysis_${timestamp}.csv`;
+
+        const link = document.createElement("a");
+        link.href = url;
+        link.setAttribute("download", filename);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        toast("CSV ready", {
+          description: `Exported ${filtered.length} analysis record(s).`,
+        });
+      } catch (err) {
+        console.error("ImageAnalysisTable CSV export error:", err);
+        toast("Failed to export CSV", {
+          description:
+            err && typeof err.message === "string"
+              ? err.message
+              : "An unexpected error occurred while preparing the CSV.",
+        });
+      } finally {
+        setCsvExporting(false);
+      }
+    },
+    [csvExporting, filtered, wid, enriched, currentWorkspace]
+  );
+
   return (
     <div className="w-full">
-      {/* Filters row: 5 inputs + Clear button */}
-      <div className="grid grid-cols-[repeat(5,minmax(0,1fr))_auto] gap-4 w-full mb-6">
+      {/* Filters row: 5 inputs + Clear + CSV */}
+      <div className="grid grid-cols-[repeat(5,minmax(0,1fr))_auto_auto] gap-4 w-full mb-6 items-stretch">
         {renderSelect("Vehicle Type", "type")}
         {renderSelect("Color", "color")}
         {renderSelect("Make", "make")}
@@ -369,23 +569,38 @@ export default function ImageAnalysisTable({ workspaceId: wid }) {
         />
         <Button
           variant="outline"
-          className="h-12 px-6 py-2 text-sm rounded-md border-neutral-700"
+          className="h-12 px-4 text-sm rounded-md border-neutral-700 whitespace-nowrap"
           onClick={clearFilters}
           title="Clear all filters"
           type="button"
         >
           Clear
         </Button>
+        <Button
+          type="button"
+          onClick={handleDownloadCsv}
+          disabled={csvExporting || !filtered.length}
+          className={[
+            "h-12 px-4 text-sm gap-2 bg-neutral-950 border-[1px] border-neutral-700 text-white rounded-md flex flex-row items-center justify-center whitespace-nowrap",
+            csvExporting || !filtered.length ? "opacity-70 cursor-not-allowed" : "hover:bg-orange-500",
+          ].join(" ")}
+        >
+          {csvExporting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Download size={14} />
+          )}
+          CSV
+        </Button>
       </div>
 
       {/* Table */}
-      <div className="w-full mt-8 border border-neutral-800 rounded-lg overflow-hidden">
+      <div className="w-full border border-neutral-800 rounded-lg overflow-hidden">
         <Table className="border-spacing-x-4 border-spacing-y-0 [&_th]:px-2 [&_td]:px-2">
           <TableHeader className="bg-neutral-900 border-b border-neutral-800">
             <TableRow>
               <TableHead className="text-white">ID</TableHead>
               <TableHead className="text-white">Snapshot</TableHead>
-              {/* Column order emphasis: COLOR → TYPE → MAKE → MODEL */}
               <TableHead className="text-white">Color</TableHead>
               <TableHead className="text-white">Type</TableHead>
               <TableHead className="text-white">Make</TableHead>
@@ -401,7 +616,7 @@ export default function ImageAnalysisTable({ workspaceId: wid }) {
               <TableRow>
                 <TableCell colSpan={9} className="text-xs text-neutral-400 py-8 text-center">
                   <Loader2 className="inline mr-2 h-4 w-4 animate-spin" />
-                  Loading analysis…
+                  Loading analysis
                 </TableCell>
               </TableRow>
             )}
@@ -432,7 +647,10 @@ export default function ImageAnalysisTable({ workspaceId: wid }) {
 
                   {/* Snapshot triggers details dialog */}
                   <TableCell>
-                    <Dialog open={openId === row.id} onOpenChange={(o) => setOpenId(o ? row.id : null)}>
+                    <Dialog
+                      open={openId === row.id}
+                      onOpenChange={(o) => setOpenId(o ? row.id : null)}
+                    >
                       <DialogTrigger asChild>
                         <div
                           className="h-16 w-24 border border-neutral-800 rounded-sm overflow-hidden cursor-pointer"
@@ -456,15 +674,23 @@ export default function ImageAnalysisTable({ workspaceId: wid }) {
                     </Dialog>
                   </TableCell>
 
-                  {/* Color (uppercased, no conf rule) */}
-                  <TableCell className="text-xs">{String(colorBase || "-").toUpperCase()}</TableCell>
+                  {/* Color */}
+                  <TableCell className="text-xs">
+                    {String(colorBase || "-").toUpperCase()}
+                  </TableCell>
 
-                  {/* Type / Make with conf styling & rules */}
-                  <TableCell className="text-xs">{renderLabelWithConf(s.type, typeConf)}</TableCell>
-                  <TableCell className="text-xs">{renderLabelWithConf(s.make, makeConf)}</TableCell>
+                  {/* Type and Make with conf styling */}
+                  <TableCell className="text-xs">
+                    {renderLabelWithConf(s.type, typeConf)}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {renderLabelWithConf(s.make, makeConf)}
+                  </TableCell>
 
-                  {/* Model (display trimmed), conf rules apply; if null, "-" and no conf */}
-                  <TableCell className="text-xs">{renderLabelWithConf(modelDisplay, modelConf)}</TableCell>
+                  {/* Model with trimmed display and conf rules */}
+                  <TableCell className="text-xs">
+                    {renderLabelWithConf(modelDisplay, modelConf)}
+                  </TableCell>
 
                   {/* Plate */}
                   <TableCell className="text-xs">{plate}</TableCell>
@@ -474,7 +700,7 @@ export default function ImageAnalysisTable({ workspaceId: wid }) {
                     <Badge variant="secondary">{row.status || s.status || "-"}</Badge>
                   </TableCell>
 
-                  {/* View icon (also opens the same dialog as the snapshot) */}
+                  {/* View icon */}
                   <TableCell className="text-center">
                     <Button
                       variant="ghost"
@@ -511,7 +737,9 @@ export default function ImageAnalysisTable({ workspaceId: wid }) {
               <PaginationItem>
                 <PaginationNext
                   className="text-white"
-                  onClick={() => setPage((prev) => (prev < totalPages ? prev + 1 : prev))}
+                  onClick={() =>
+                    setPage((prev) => (prev < totalPages ? prev + 1 : prev))
+                  }
                 />
               </PaginationItem>
             </PaginationContent>
