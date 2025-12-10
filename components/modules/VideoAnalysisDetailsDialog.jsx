@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Fragment } from "react";
+import { useEffect, useMemo, useState, Fragment } from "react";
 import { useParams } from "next/navigation";
 import {
   DialogContent,
@@ -14,6 +14,15 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  XAxis,
+  YAxis,
+  Tooltip,
+} from "recharts";
+import { ChartContainer } from "@/components/ui/chart";
 import VideoConfidenceBar from "./VideoConfidenceBar";
 
 const FRAME =
@@ -23,6 +32,19 @@ const IMG = "h-full w-full object-contain";
 const PLATE_FRAME =
   "w-full h-24 rounded-md overflow-hidden border border-neutral-800 bg-black";
 const PLATE_IMG = "h-full w-full object-contain";
+
+// Parts visualization layout:
+// - We cap at 12 parts (MAX_PARTS_DISPLAY).
+// - PART_ROW_HEIGHT approximates the visual row height of each list item.
+// - The chart height is computed from the number of parts so that one
+//   list row ≈ one bar "slot" in the chart.
+const PARTS_LEFT_MARGIN = 120;
+const MAX_PARTS_DISPLAY = 12;
+const PART_ROW_HEIGHT = 32;
+const PARTS_CHART_MIN_HEIGHT = 200;
+const PARTS_CHART_TOP_PADDING = 40;
+const PARTS_BAR_SIZE = 14;
+const PARTS_BAR_GAP = 8;
 
 // Guard helper: ensure we only treat real UUIDs as valid video IDs.
 // This prevents the literal string "undefined" (and other junk)
@@ -41,6 +63,32 @@ function pct(x) {
   if (x == null || Number.isNaN(+x)) return "—";
   const n = Math.max(0, Math.min(1, +x));
   return `${(n * 100).toFixed(1)}%`;
+}
+
+/**
+ * normalizePartsForDisplay
+ * - Clamps conf to [0, 1], sorts descending by confidence,
+ *   and returns only the top MAX_PARTS_DISPLAY parts.
+ * - Used so that both the list and chart share the SAME
+ *   Top-12 view of parts.
+ */
+function normalizePartsForDisplay(parts) {
+  if (!Array.isArray(parts) || parts.length === 0) {
+    return [];
+  }
+
+  const score = (p) => {
+    const conf = p?.conf;
+    if (conf == null || Number.isNaN(+conf)) {
+      return 0;
+    }
+    const n = Math.max(0, Math.min(1, +conf));
+    return n;
+  };
+
+  return [...parts]
+    .sort((a, b) => score(b) - score(a))
+    .slice(0, MAX_PARTS_DISPLAY);
 }
 
 function Field({ label, children, mono }) {
@@ -233,6 +281,8 @@ function TmmGrid({ v }) {
 /**
  * PartsList
  * - Renders part-level evidence: { name, conf }[].
+ * - Each row is given a minimum height to better align with
+ *   the per-row height used by the chart (PART_ROW_HEIGHT).
  */
 function PartsList({ parts }) {
   if (!Array.isArray(parts) || parts.length === 0) {
@@ -244,13 +294,115 @@ function PartsList({ parts }) {
       {parts.map((p, i) => (
         <li
           key={`${p?.name || "part"}-${i}`}
-          className="flex items-center justify-between border-b border-neutral-800 py-1"
+          className="flex items-center justify-between border-b border-neutral-800 py-1 min-h-[32px]"
         >
           <span className="text-sm">{p?.name || "Part"}</span>
           <span className="text-xs text-neutral-500">{pct(p?.conf)}</span>
         </li>
       ))}
     </ul>
+  );
+}
+
+function VideoPartsConfidenceChart({ parts }) {
+  const names = useMemo(
+    () =>
+      Array.from(
+        new Set((parts || []).map((p) => (p?.name || "").toString()))
+      ).filter(Boolean),
+    [parts]
+  );
+
+  if (names.length === 0) {
+    return (
+      <div className="w-full h-72 rounded-md border border-neutral-800 bg-neutral-950/60 flex items-center justify-center text-xs text-neutral-500">
+        No parts detected.
+      </div>
+    );
+  }
+
+  const to01 = (x) =>
+    x == null || Number.isNaN(+x) ? 0 : Math.max(0, Math.min(1, +x));
+
+  const pMap = new Map();
+  (parts || []).forEach((p) => {
+    const key = (p?.name || "").toString();
+    if (!key) return;
+    pMap.set(key, to01(p?.conf));
+  });
+
+  const rows = names.map((name) => ({
+    name,
+    cmt: Math.round((pMap.get(name) ?? 0) * 100),
+  }));
+
+  const count = rows.length;
+
+  // Dynamic chart height:
+  // - Scales with number of parts so that one bar "slot"
+  //   roughly matches one list row.
+  // - When fewer than 12 parts, bars stay anchored to the top
+  //   instead of floating in a very tall canvas.
+  const chartHeight = Math.max(
+    PARTS_CHART_MIN_HEIGHT,
+    count * PART_ROW_HEIGHT + PARTS_CHART_TOP_PADDING
+  );
+
+  return (
+    <ChartContainer
+      config={{
+        cmt: { label: "CMT", color: "var(--chart-1)" },
+      }}
+      className="w-full"
+      style={{ height: chartHeight }}
+    >
+      <BarChart
+        accessibilityLayer
+        data={rows}
+        layout="vertical"
+        margin={{ left: PARTS_LEFT_MARGIN, right: 12, top: 8, bottom: 8 }}
+        barCategoryGap="20%"
+        barGap={PARTS_BAR_GAP}
+      >
+        <CartesianGrid horizontal={false} vertical={false} />
+        <XAxis type="number" hide domain={[0, 100]} />
+        <YAxis
+          dataKey="name"
+          type="category"
+          tickLine={false}
+          tickMargin={10}
+          axisLine={false}
+        />
+        <Tooltip
+          cursor={false}
+          content={(props) => {
+            const p = props?.payload?.[0]?.payload;
+            if (!p) return null;
+            return (
+              <div className="rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs">
+                <div className="mb-1 font-medium">Part: {p.name}</div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className="inline-block h-2 w-2 rounded-sm"
+                    style={{ background: "var(--chart-1)" }}
+                  />
+                  <span>CMT</span>
+                  <span className="ml-auto text-neutral-300">{p.cmt}%</span>
+                </div>
+              </div>
+            );
+          }}
+          wrapperStyle={{ outline: "none" }}
+        />
+        <Bar
+          dataKey="cmt"
+          name="CMT"
+          fill="var(--chart-1)"
+          barSize={PARTS_BAR_SIZE}
+          radius={5}
+        />
+      </BarChart>
+    </ChartContainer>
   );
 }
 
@@ -518,11 +670,22 @@ export default function VideoAnalysisDetailsDialog({
   }, [open, id, videoId, workspaceId, params]);
 
   const view = data ? normalizeDetectionView(data) : null;
-  const snapshotUrl = view?.snapshotUrl || null;
   const plateUrl = view?.plateUrl || null;
 
+  const annotatedImageUrl =
+    view?.assets?.annotatedUrl ||
+    view?.assets?.annotated_url ||
+    view?.annotatedUrl ||
+    view?.annotated_url ||
+    null;
+
+  // Top-12 parts by confidence, shared between:
+  // - PartsList (textual list)
+  // - VideoPartsConfidenceChart (single-series chart)
+  const partsTop12 = view ? normalizePartsForDisplay(view.parts) : [];
+
   return (
-    <DialogContent className="sm:max-w-[780px] max-h-[85vh] overflow-y-auto z-[70]">
+    <DialogContent className="sm:max-w-[960px] max-h-[85vh] overflow-y-auto z-[70]">
       <DialogHeader className="pb-2">
         <DialogTitle className="text-lg">Detection Details</DialogTitle>
         <DialogDescription>
@@ -545,24 +708,24 @@ export default function VideoAnalysisDetailsDialog({
         </div>
       ) : (
         <div className="space-y-4">
-          {/* TOP: Snapshot + plate + basic attrs */}
+          {/* TOP: Annotated snapshot + plate + basic attrs */}
           <div className="grid grid-cols-1 md:grid-cols-[1.5fr_1fr] gap-4">
             <Card title="Vehicle Snapshot & Plate Details">
               <div className={FRAME}>
-                {snapshotUrl ? (
-                  <img
-                    src={snapshotUrl}
-                    alt="Snapshot"
-                    className={IMG}
-                    loading="eager"
-                  />
-                ) : (
-                  <div className={FRAME_INNER_CENTER}>
+                <div className={FRAME_INNER_CENTER}>
+                  {annotatedImageUrl ? (
+                    <img
+                      src={annotatedImageUrl}
+                      alt="Annotated snapshot"
+                      className={IMG}
+                      loading="eager"
+                    />
+                  ) : (
                     <span className="text-xs text-neutral-600">
-                      No snapshot available.
+                      No annotated image available.
                     </span>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
 
               <div className="mt-4 grid grid-row-1 md:grid-row-[minmax(0,1.1fr)_minmax(0,0.9fr)] gap-3">
@@ -641,7 +804,14 @@ export default function VideoAnalysisDetailsDialog({
 
           {/* PARTS */}
           <Card title="Detected Parts">
-            <PartsList parts={view.parts} />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div>
+                <PartsList parts={partsTop12} />
+              </div>
+              <div>
+                <VideoPartsConfidenceChart parts={partsTop12} />
+              </div>
+            </div>
           </Card>
 
           {view.error_msg && (

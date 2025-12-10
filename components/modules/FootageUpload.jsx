@@ -156,7 +156,7 @@ function normalizeVideoRow(raw) {
     camera_code: raw.cameraCode ?? raw.camera_code ?? "",
     recorded_at: raw.recordedAt ?? raw.recorded_at ?? null,
     s3_key_raw: raw.s3KeyRaw ?? raw.s3_key_raw ?? "",
-    frame_stride: raw.frameStride ?? raw.frame_stride ?? 3,
+    frame_stride: raw.frameStride ?? raw.frame_stride ?? 1,
     status: raw.status ?? "uploaded",
     created_at: raw.createdAt ?? raw.created_at ?? null,
     updated_at: raw.updatedAt ?? raw.updated_at ?? null,
@@ -397,7 +397,7 @@ export default function FootageUpload() {
         content_type: file.type || "video/mp4",
         file_size_bytes: file.size,
         camera_code, // normalized above
-        frame_stride: 3,
+        frame_stride: 1,
         recorded_at: recorded_at,
         workspace_code: currentWorkspace?.code || null,
       })
@@ -429,7 +429,7 @@ export default function FootageUpload() {
         videoId: video_id,
         s3KeyRaw: key,
         fileName: file_name,
-        frameStride: 3,
+        frameStride: 1,
         recordedAt: recorded_at,
         cameraCode: camera_code,
         cameraLabel: camera_label,
