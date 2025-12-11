@@ -3,7 +3,7 @@
 import React, { useMemo, useState, useCallback, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
-import { FileText, Loader2, RefreshCw, Download, Sparkles } from "lucide-react";
+import { FileText, Loader2, Download, Sparkles } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 
@@ -37,7 +37,6 @@ function asPathFromUrlOrKey(value) {
 // Option A: derive videoId from the snapshot S3 key / URL path.
 // Expects layouts like:
 //   demo_user/<workspace_id>/<video_id>/snapshots/...
-// or:
 //   <workspace_id>/<video_id>/snapshots/...
 function deriveVideoIdFromItem(item) {
   if (!item || typeof item !== "object") return null;
@@ -109,12 +108,9 @@ function normalizeDetectionForStaging(item, idx, videosById) {
       ? primary.base
       : null;
 
-  const typeText =
-    item.type || item.typeLabel || item.yoloType || "";
-  const makeText =
-    item.make || item.makeLabel || "";
-  const modelText =
-    item.model || item.modelLabel || "";
+  const typeText = item.type || item.typeLabel || item.yoloType || "";
+  const makeText = item.make || item.makeLabel || "";
+  const modelText = item.model || item.modelLabel || "";
 
   return {
     idx: idx + 1,
@@ -137,9 +133,7 @@ function normalizeDetectionForStaging(item, idx, videosById) {
     model_conf: safeNumber(item.model_conf ?? item.modelConf),
     recorded_at,
     detected_at,
-    detected_in_ms: safeNumber(
-      item.detected_in_ms ?? item.detectedInMs
-    ),
+    detected_in_ms: safeNumber(item.detected_in_ms ?? item.detectedInMs),
     camera_code,
     camera_label,
   };
@@ -225,44 +219,48 @@ function buildReportPayload(staging) {
   };
 }
 
-// Prefer pdf.js hosted viewer so you get zoom/download UI for free
-function viewerUrlFor(pdfUrl) {
-  const base = "https://mozilla.github.io/pdf.js/web/viewer.html";
-  return `${base}?file=${encodeURIComponent(pdfUrl)}`;
-}
+/* ---------------------------- API download helper ------------------------ */
 
-/* ---------------------------- API (placeholder) --------------------------- */
 /**
- * Attempts to request report generation. Expects backend to respond with:
- *   { pdf_url: "https://s3/your-report.pdf" }
- *
- * If backend isn’t ready, we fall back to a public PDF so the UI still works.
+ * Calls the technical report API and triggers a browser download
+ * of the returned PDF buffer.
  */
-async function requestTechnicalReport(wid, payload) {
-  try {
-    // TODO: change to your real API path and auth headers as needed
-    const res = await fetch(
-      `/api/reports/technical?workspace_id=${encodeURIComponent(wid)}`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      }
-    );
-
-    if (res.ok) {
-      const j = await res.json().catch(() => ({}));
-      if (j?.pdf_url) return j.pdf_url;
+async function downloadTechnicalReport(wid, payload, workspaceCode) {
+  const res = await fetch(
+    `/api/reports/technical?workspace_id=${encodeURIComponent(wid)}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
     }
-    // Non-OK – fall through to demo
-    throw new Error(`backend returned ${res.status}`);
-  } catch {
-    // DEMO fallback – public PDF with CORS open (arXiv)
-    return "https://arxiv.org/pdf/1706.03762.pdf"; // "Attention Is All You Need"
+  );
+
+  if (!res.ok) {
+    const msg =
+      (await res.text().catch(() => "")) ||
+      `Failed to generate PDF (${res.status})`;
+    throw new Error(msg);
   }
+
+  const blob = await res.blob();
+  if (!blob || blob.size === 0) {
+    throw new Error("Empty PDF response from backend.");
+  }
+
+  const url = URL.createObjectURL(blob);
+
+  // Trigger a download via a temporary <a> element.
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `CVITX_${workspaceCode || wid}_technical_report.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
-// List videos for a workspace (same behavior as FootagePlayback).
+/* ---------------------- List videos (same as playback) ------------------- */
+
 // Backend shape: { workspaceId, items: VideoRowOut[] } or a plain array.
 async function listWorkspaceVideos(wid) {
   const r = await fetch(`/api/workspaces/${wid}/videos`, {
@@ -336,29 +334,22 @@ export default function AITechnicalWriterReport() {
   }, [wid, videoCatalog, publishVideos]);
 
   const [loading, setLoading] = useState(false);
-  const [pdfUrl, setPdfUrl] = useState(null); // the S3 (or demo) PDF
-  const [viewerSrc, setViewerSrc] = useState(null); // the pdf.js viewer URL (derived)
-  const [refreshKey, setRefreshKey] = useState(0); // allow forcing iframe reload
+  const [lastGeneratedAt, setLastGeneratedAt] = useState(null);
 
   const count = items.length;
 
-  const generate = useCallback(async () => {
+  const generateAndDownload = useCallback(async () => {
     if (!count) {
       toast("Timeline is empty", {
         description: "Add detections to generate a report.",
       });
       return;
     }
+
     setLoading(true);
-    setPdfUrl(null);
-    setViewerSrc(null);
 
     // Build staging payload: workspace + videos + detections (joined & grouped)
-    const staging = buildTimelineStaging(
-      currentWorkspace,
-      items,
-      videosForWid
-    );
+    const staging = buildTimelineStaging(currentWorkspace, items, videosForWid);
 
     // Store in global staging slice for future CSV/PDF pipelines
     try {
@@ -383,24 +374,26 @@ export default function AITechnicalWriterReport() {
       toast("Generating report…", {
         description: "Sending timeline to AI backend.",
       });
-      const url = await requestTechnicalReport(wid, payload);
-      setPdfUrl(url);
-      setViewerSrc(viewerUrlFor(url));
-      toast("Report ready", {
-        description: "Scroll and zoom the PDF below.",
+
+      await downloadTechnicalReport(
+        wid,
+        payload,
+        currentWorkspace?.code || null
+      );
+
+      const ts = new Date().toISOString();
+      setLastGeneratedAt(ts);
+
+      toast("Report downloaded", {
+        description:
+          "Check your browser’s Downloads list for the latest PDF report.",
       });
     } catch (e) {
       toast("Generation failed", { description: String(e?.message || e) });
     } finally {
       setLoading(false);
     }
-  }, [count, currentWorkspace, items, wid, videosForWid, setTimelineStaging]);
-
-  const regenerate = useCallback(async () => {
-    // Useful if timeline changed and you want a new report
-    await generate();
-    setRefreshKey((k) => k + 1); // force iframe reload even if same URL
-  }, [generate]);
+  }, [count, currentWorkspace, items, videosForWid, wid, setTimelineStaging]);
 
   const neutralBtn =
     "inline-flex items-center gap-2 h-8 px-3 text-xs rounded-md " +
@@ -408,7 +401,6 @@ export default function AITechnicalWriterReport() {
     "disabled:opacity-60 disabled:pointer-events-none";
 
   return (
-    // same width rules as timeline panels; no overflow beyond content slot
     <div className="w-full min-w-0 rounded-xl bg-neutral-900 border border-neutral-800 p-4 lg:p-6 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
@@ -423,93 +415,79 @@ export default function AITechnicalWriterReport() {
 
       <div className="h-px w-full bg-neutral-800 my-4" />
 
-      {/* Idle state: centered CTA */}
-      {!pdfUrl && !loading && (
-        <div className="w-full min-h-[240px] grid place-items-center">
-          <Button
-            onClick={generate}
-            className="gap-2 px-5 py-6 text-sm bg-transparent border-[1px] border-neutral-800 hover:border-orange-400 transition-all duration-300 ease-in-out"
-          >
-            <FileText className="h-4 w-4" />
-            Generate AI Technical Report
-          </Button>
-        </div>
-      )}
-
-      {/* Loading state */}
-      {loading && (
-        <div className="w-full min-h-[240px] grid place-items-center">
-          <div className="flex items-center gap-3 text-sm text-neutral-300">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Generating Technical Report… This can take a moment.
+      {/* Main state */}
+      <div className="flex flex-col gap-4">
+        {/* CTA / Loading */}
+        {!loading && (
+          <div className="w-full min-h-[200px] grid place-items-center">
+            <Button
+              onClick={generateAndDownload}
+              className="gap-2 px-5 py-6 text-sm bg-transparent border-[1px] border-neutral-800 hover:border-orange-400 transition-all duration-300 ease-in-out"
+            >
+              <FileText className="h-4 w-4" />
+              Generate &amp; Download AI Technical Report (PDF)
+            </Button>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Viewer state */}
-      {pdfUrl && viewerSrc && !loading && (
-        <div className="flex flex-col gap-3">
-          {/* Controls */}
-          <div className="flex items-center justify-between">
-            <div className="text-xs text-neutral-400">
-              Report for{" "}
-              <span className="font-mono">
-                {currentWorkspace?.code || "-"}
-              </span>{" "}
-              ·{" "}
-              <span className="font-medium">
-                {currentWorkspace?.title || "Workspace"}
+        {loading && (
+          <div className="w-full min-h-[200px] grid place-items-center">
+            <div className="flex items-center gap-3 text-sm text-neutral-300">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Generating Technical Report… This can take a moment.
+            </div>
+          </div>
+        )}
+
+        {/* Download info / small status footer */}
+        <div className="flex items-center justify-between text-xs text-neutral-400">
+          <div>
+            Workspace{" "}
+            <span className="font-mono">
+              {currentWorkspace?.code || "-"}
+            </span>{" "}
+            ·{" "}
+            <span className="font-medium">
+              {currentWorkspace?.title || "Workspace"}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            {lastGeneratedAt && (
+              <span className="opacity-80">
+                Last generated:{" "}
+                <span className="font-mono">
+                  {lastGeneratedAt}
+                </span>
               </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button asChild className={neutralBtn} title="Download PDF">
-                <a
-                  href={pdfUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  Download
-                </a>
-              </Button>
-
-              {/* Regenerate (same style) */}
-              <Button
-                className={neutralBtn}
-                onClick={regenerate}
-                title="Regenerate with current timeline"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                Regenerate
-              </Button>
-            </div>
-          </div>
-
-          {/* PDF.js viewer (zoom, download, thumbnails built-in) */}
-          <div className="w-full min-w-0 h-[72vh] rounded-lg overflow-hidden border border-neutral-800 bg-neutral-800">
-            <iframe
-              key={refreshKey}
-              src={viewerSrc}
-              className="w-full h-full"
-              // sandbox keeps it safe but still allows forms/scripts needed by viewer
-              sandbox="allow-scripts allow-same-origin allow-forms allow-modals"
-              // avoid layout jump if viewer is heavy
-              loading="lazy"
-              title="AI Technical Report PDF"
-            />
+            )}
+            <Button
+              type="button"
+              className={neutralBtn}
+              onClick={generateAndDownload}
+              disabled={loading || !count}
+              title={
+                count
+                  ? "Generate a fresh PDF report and download it"
+                  : "Timeline is empty; add detections first"
+              }
+            >
+              <Download className="h-3.5 w-3.5" />
+              {loading ? "Generating…" : "Generate again"}
+            </Button>
           </div>
         </div>
-      )}
+      </div>
 
-      {/* ---- Developer Notes (safe to keep or remove) ----
-        - The "Generate" button posts: POST /api/reports/technical?workspace_id={wid}
-          Body: buildReportPayload(workspace, timelineItems)
-          Expected response: { pdf_url: "https://s3/path/report.pdf" }
-        - Replace requestTechnicalReport() with your real API.
-        - If your S3 bucket requires signed URLs, return them here.
-        - We use Mozilla’s hosted PDF.js viewer for a full UI (zoom/download).
-          If you want to self-host, copy pdf.js into /public/pdfjs and point `viewerUrlFor()`
-          to /pdfjs/web/viewer.html?file=...
+      {/* ---- Developer Notes ----
+        - The main button triggers:
+            POST /api/reports/technical?workspace_id={wid}
+          Body: buildReportPayload(staging)
+          Response: raw PDF buffer (Content-Type: application/pdf).
+        - On success, we read the response as a Blob and programmatically
+          start a download using a temporary <a> element.
+        - This avoids data: URLs, iframes, and popups that Chrome may block.
+        - Timeline staging is still written into the global store for other
+          pipelines (CSV export, future report variants, etc.).
       ---------------------------------------------------- */}
     </div>
   );
